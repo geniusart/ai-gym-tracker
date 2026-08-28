@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pymongo.errors import DuplicateKeyError
 
-from app.auth import get_current_user, maybe_refresh_token
+from app.auth import attach_refreshed_token, get_current_user
 from app.database import get_db
+from app.routes._request_body import read_json_object
 from app.schemas import SCHEMA_REGISTRY, PlanType
 from app.schemas.base import validate_base
 from app.schemas import strength_v1
@@ -17,7 +18,7 @@ async def list_plans(
     user: dict = Depends(get_current_user),
 ):
     """Return the latest version of each plan (full content) for the user."""
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
 
     match: dict = {"user_id": user["_id"]}
     if type:
@@ -47,20 +48,9 @@ async def put_plan(
     response: Response,
     user: dict = Depends(get_current_user),
 ):
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
 
-    try:
-        data = await request.json()
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid JSON body",
-        )
-    if not isinstance(data, dict):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Plan body must be an object",
-        )
+    data = await read_json_object(request, "Plan body")
 
     # 1. Base field validation (plan_type, plan_id, plan_version, plan_name, created_at)
     validate_base(data)
@@ -132,10 +122,3 @@ async def _load_catalog_slugs(plan_type: str) -> set[str]:
     )
     return {doc["slug"] async for doc in cursor}
 
-
-def _attach_refreshed_token(user: dict, response: Response | None) -> None:
-    payload = user.get("_token_payload")
-    if payload and response:
-        new_token = maybe_refresh_token(payload)
-        if new_token:
-            response.headers["X-Refreshed-Token"] = new_token

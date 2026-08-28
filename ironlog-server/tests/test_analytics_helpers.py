@@ -5,12 +5,18 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.routes._analytics_helpers import (
+    as_number,
     best_set_of,
     epley_1rm,
+    is_number,
     parse_iso,
     relative_delta_pct,
     split_window,
+    split_window_avg,
+    to_utc,
+    utc_isoformat,
     week_start,
+    window_is_covered,
     workout_metrics,
 )
 
@@ -184,3 +190,103 @@ def test_parse_iso_accepts_z_suffix():
 def test_parse_iso_accepts_offset_suffix():
     d = parse_iso("2026-04-30T12:00:00+02:00")
     assert d.tzinfo is not None
+
+
+# MARK: - to_utc / utc_isoformat
+
+def test_to_utc_treats_naive_input_as_utc():
+    """Logs are raw client JSON; a naive `started_at` must not crash the
+    comparison against an aware `now`."""
+    d = to_utc("2026-08-01T10:00:00")
+    assert d == datetime(2026, 8, 1, 10, 0, tzinfo=timezone.utc)
+
+
+def test_to_utc_converts_offset_to_utc():
+    assert to_utc("2026-08-01T13:00:00+03:00") == datetime(
+        2026, 8, 1, 10, 0, tzinfo=timezone.utc
+    )
+
+
+@pytest.mark.parametrize("value", [None, "", "None", "not-a-date", 42, {}])
+def test_to_utc_returns_none_for_unusable_values(value):
+    assert to_utc(value) is None
+
+
+def test_utc_isoformat_normalizes_offset_for_string_range_filters():
+    """`started_at` is stored as a string, so the Mongo bound is compared
+    lexicographically and has to be in UTC."""
+    assert utc_isoformat("2026-06-15T12:00:00+03:00") == "2026-06-15T09:00:00+00:00"
+
+
+def test_utc_isoformat_bound_does_not_exclude_same_instant_z_value():
+    stored = "2026-06-15T09:00:00Z"
+    bound = utc_isoformat("2026-06-15T12:00:00+03:00")
+    assert stored >= bound  # the comparison Mongo actually performs
+
+
+# MARK: - numeric coercion
+
+def test_workout_metrics_accepts_float_reps():
+    """BSON stores a client-written `10.0` as a double; dropping those made
+    /exercise-progress and /body-parts disagree on the same set."""
+    m = workout_metrics([{"weight_kg": 100, "reps": 10.0}])
+    assert m["working_sets"] == 1
+    assert m["volume"] == 1000
+
+
+def test_workout_metrics_rejects_bool_reps():
+    """`isinstance(True, int)` is True, so a bool would count as 1 rep."""
+    m = workout_metrics([{"weight_kg": 100, "reps": True}])
+    assert m["working_sets"] == 0
+
+
+def test_workout_metrics_counts_bodyweight_sets():
+    m = workout_metrics([{"weight_kg": 0, "reps": 12}])
+    assert m["working_sets"] == 1
+    assert m["volume"] == 0
+
+
+def test_is_number_and_as_number():
+    assert is_number(1) and is_number(1.5)
+    assert not is_number(True) and not is_number("1") and not is_number(None)
+    assert as_number("100") is None
+    assert as_number(100) == 100.0
+
+
+# MARK: - split_window_avg / window_is_covered
+
+def test_split_window_avg_compares_means_not_sums():
+    """More sessions in a window must not read as 'stronger'."""
+    now = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    points = [
+        {"date": now - timedelta(days=5), "value": 100},
+        {"date": now - timedelta(days=10), "value": 100},
+        {"date": now - timedelta(days=45), "value": 100},
+    ]
+    recent, prior = split_window_avg(points, days=30, now=now)
+    assert recent == 100
+    assert prior == 100
+
+
+def test_split_window_avg_empty_windows_are_none():
+    now = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    assert split_window_avg([], days=30, now=now) == (None, None)
+
+
+def test_split_window_skips_non_numeric_values():
+    now = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    points = [
+        {"date": now - timedelta(days=5), "value": "100"},
+        {"date": now - timedelta(days=5), "value": 50},
+    ]
+    recent, _ = split_window(points, days=30, now=now)
+    assert recent == 50
+
+
+def test_window_is_covered_requires_two_full_windows():
+    """A 120-day fetch cannot back a 90-day comparison: the prior half would
+    hold 30 days of data and report +200% on a flat load."""
+    now = datetime(2026, 4, 30, tzinfo=timezone.utc)
+    assert not window_is_covered(now - timedelta(days=120), now, 90)
+    assert window_is_covered(now - timedelta(days=180), now, 90)
+    assert window_is_covered(now - timedelta(days=120), now, 30)

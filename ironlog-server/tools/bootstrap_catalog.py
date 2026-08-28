@@ -2,8 +2,10 @@
 
 Reads `tools/seed_data/muscle_groups.json` and `tools/seed_data/exercises.json`
 and upserts each entry by `slug` into the corresponding mongo collection.
-Safe to run on every container start -- existing entries are updated in
-place; new entries are inserted.
+Safe to run on every container start -- new entries are inserted, and
+seed-owned entries are updated in place. Rows carrying `source: "user"`
+(written through the catalog API) are left alone, so a deploy never
+reverts a manual edit.
 
 Usage (inside container):
     python -m tools.bootstrap_catalog
@@ -35,11 +37,21 @@ async def _upsert_many(
     collection,
     docs: list[dict[str, Any]],
     label: str,
-) -> tuple[int, int]:
-    """Upserts each doc by `slug`. Returns (inserted_count, updated_count)."""
+) -> tuple[int, int, int]:
+    """Upserts each doc by `slug`.
+
+    Rows the user has edited through the catalog API carry
+    `source: "user"` and are left untouched: this runs in the app lifespan
+    on every container start, so replacing them would silently revert each
+    edit at the next deploy -- exactly what the contract in
+    `app/routes/catalog.py` promises it does not do.
+
+    Returns (inserted_count, updated_count, preserved_count).
+    """
     now = datetime.now(timezone.utc)
     inserted = 0
     updated = 0
+    preserved = 0
 
     for doc in docs:
         slug = doc["slug"]
@@ -50,8 +62,11 @@ async def _upsert_many(
             # `deprecated` defaults to False if not specified in seed.
             doc.setdefault("deprecated", False)
             doc.setdefault("replaced_by", None)
+            doc["source"] = "seed"
             await collection.insert_one(doc)
             inserted += 1
+        elif existing.get("source") == "user":
+            preserved += 1
         else:
             # Preserve created_at + deprecated/replaced_by from existing doc
             # so manual edits (e.g. via PATCH /exercises/{slug}/deprecate)
@@ -59,13 +74,15 @@ async def _upsert_many(
             doc["created_at"] = existing.get("created_at", now)
             doc["deprecated"] = existing.get("deprecated", False)
             doc["replaced_by"] = existing.get("replaced_by", None)
+            doc["source"] = "seed"
             await collection.replace_one({"slug": slug}, doc)
             updated += 1
 
     logger.info(
-        "Bootstrapped %s: %d inserted, %d updated", label, inserted, updated
+        "Bootstrapped %s: %d inserted, %d updated, %d user-edited preserved",
+        label, inserted, updated, preserved,
     )
-    return inserted, updated
+    return inserted, updated, preserved
 
 
 async def _insert_missing_exercise_docs(

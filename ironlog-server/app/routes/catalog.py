@@ -6,11 +6,13 @@ groups workout logs across plan versions by it.
 
 Reads are public. Writes (POST/PUT/PATCH) are JWT-authed; today every
 authenticated user can edit the global catalog. When we onboard a second
-user we'll gate writes behind an `is_admin` flag on the user doc.
+user we'll gate writes behind `require_admin` (see `app/auth.py`), the way
+the agent-instruction endpoint already is.
 
-The seed in `tools/seed_data/` is upserted on every container start; user
-edits via these endpoints survive restarts (bootstrap preserves
-`deprecated` / `replaced_by` / `created_at` of existing rows).
+The seed in `tools/seed_data/` is upserted on every container start. Rows
+written through these endpoints are stamped `source: "user"` and the seed
+skips them entirely, so edits survive restarts; for seed-owned rows the
+bootstrap still preserves `deprecated` / `replaced_by` / `created_at`.
 
 Pure validation/normalization helpers live in `_catalog_validators.py`
 so they can be unit-tested without pulling in the full app stack.
@@ -22,6 +24,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.routes._request_body import (
+    read_json_object,
+    read_optional_json_object,
+)
 from app.routes._catalog_validators import (
     SLUG_RE,
     normalize_exercise,
@@ -81,7 +87,7 @@ async def create_exercise(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    payload = await request.json()
+    payload = await read_json_object(request, "Exercise body")
     validate_exercise_payload_shape(payload)
     await _verify_muscle_slugs_exist(payload)
 
@@ -99,6 +105,9 @@ async def create_exercise(
         "replaced_by": None,
         "created_at": now,
         "updated_at": now,
+        # Marks the row as user-owned: the startup seed skips these
+        # instead of replacing them with tools/seed_data content.
+        "source": "user",
     }
     await get_db().exercises.insert_one(doc)
     doc.pop("_id", None)
@@ -120,13 +129,14 @@ async def update_exercise(
             detail=f"Exercise '{slug}' not found",
         )
 
-    payload = await request.json()
+    payload = await read_json_object(request, "Exercise body")
     payload["slug"] = slug  # disallow rename via PUT
     validate_exercise_payload_shape(payload)
     await _verify_muscle_slugs_exist(payload)
 
     update = normalize_exercise(payload)
     update["updated_at"] = datetime.now(timezone.utc)
+    update["source"] = "user"  # keep the startup seed from reverting this
     await get_db().exercises.update_one({"slug": slug}, {"$set": update})
 
     fresh = await get_db().exercises.find_one({"slug": slug}, projection={"_id": 0})
@@ -147,11 +157,7 @@ async def deprecate_exercise(
             detail=f"Exercise '{slug}' not found",
         )
 
-    body: dict = {}
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    body = await read_optional_json_object(request)
 
     replaced_by = body.get("replaced_by")
     if replaced_by is not None:
@@ -210,7 +216,7 @@ async def create_muscle_group(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    payload = await request.json()
+    payload = await read_json_object(request, "Muscle group body")
     validate_muscle_payload(payload)
 
     slug = payload["slug"]
@@ -221,7 +227,12 @@ async def create_muscle_group(
         )
 
     now = datetime.now(timezone.utc)
-    doc = {**normalize_muscle(payload), "created_at": now, "updated_at": now}
+    doc = {
+        **normalize_muscle(payload),
+        "created_at": now,
+        "updated_at": now,
+        "source": "user",
+    }
     await get_db().muscle_groups.insert_one(doc)
     doc.pop("_id", None)
     return doc
@@ -239,12 +250,13 @@ async def update_muscle_group(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Muscle group '{slug}' not found",
         )
-    payload = await request.json()
+    payload = await read_json_object(request, "Muscle group body")
     payload["slug"] = slug
     validate_muscle_payload(payload)
 
     update = normalize_muscle(payload)
     update["updated_at"] = datetime.now(timezone.utc)
+    update["source"] = "user"  # keep the startup seed from reverting this
     await get_db().muscle_groups.update_one({"slug": slug}, {"$set": update})
 
     return await get_db().muscle_groups.find_one({"slug": slug}, projection={"_id": 0})

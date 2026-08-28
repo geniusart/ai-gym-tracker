@@ -11,7 +11,10 @@ import re
 from fastapi import HTTPException, status
 
 # Slug convention: lowercase ASCII letters/digits/underscore only.
-SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+# Anchored with \Z, not $: in Python "$" also matches just before a
+# trailing newline, so "squat\n" would pass as a slug, dodge the
+# duplicate check and add a second, unreachable catalog row.
+SLUG_RE = re.compile(r"^[a-z][a-z0-9_]*\Z")
 
 # Mirrors the strength plan schema enums; cycling has its own.
 VALID_BODY_PARTS = {
@@ -45,6 +48,20 @@ def require_str(p: dict, field: str) -> None:
         )
 
 
+def require_slug_list(values: list, field: str) -> None:
+    """Every element must be a slug string.
+
+    The route hashes these into a set to look the muscles up, so an
+    unchecked dict or list element raises TypeError there instead of
+    producing a 422 here.
+    """
+    if not all(isinstance(v, str) and SLUG_RE.match(v) for v in values):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{field} must be an array of slug strings",
+        )
+
+
 def require_enum(p: dict, field: str, valid: set[str]) -> None:
     val = p.get(field)
     if val not in valid:
@@ -72,12 +89,14 @@ def validate_exercise_payload_shape(p: dict) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="primary_muscles must be a non-empty array",
         )
+    require_slug_list(primary, "primary_muscles")
     secondary = p.get("secondary_muscles", [])
     if not isinstance(secondary, list):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="secondary_muscles must be an array",
         )
+    require_slug_list(secondary, "secondary_muscles")
 
     aliases = p.get("aliases", [])
     if not isinstance(aliases, list) or not all(isinstance(a, str) for a in aliases):

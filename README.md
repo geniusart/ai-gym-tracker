@@ -78,7 +78,7 @@ iOS-приложение для трекинга силовых трениров
 | GET | /schema | нет | Описание схемы по plan_type |
 | GET | /agent-instructions/plan-import | нет | Markdown-инструкция для AI-агентов по генерации импортируемых планов |
 | GET | /agent-instructions/plan-import.json | нет | Та же инструкция с live-ссылками в JSON |
-| PUT | /agent-instructions/plan-import | JWT | Обновить инструкцию в БД без редеплоя контейнера |
+| PUT | /agent-instructions/plan-import | JWT + админ | Обновить инструкцию в БД без редеплоя контейнера. Требует, чтобы email был в `ADMIN_EMAILS` или на пользователе стоял `is_admin: true` |
 | POST | /register | нет | Регистрация -> JWT |
 | POST | /login | нет | Вход -> JWT |
 | GET | /plans | JWT | Последняя версия каждого plan_id, FULL content |

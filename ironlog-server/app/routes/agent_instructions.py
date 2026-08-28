@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from app.auth import get_current_user
+from app.auth import require_admin
 from app.database import get_db
 
 router = APIRouter(tags=["agent-instructions"])
@@ -104,7 +104,7 @@ async def get_plan_import_instructions_json(request: Request):
 )
 async def update_plan_import_instructions(
     body: AgentInstructionUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
 ):
     content = body.content.strip()
     if not content:

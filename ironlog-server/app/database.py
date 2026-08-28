@@ -86,6 +86,11 @@ async def _ensure_indexes() -> None:
         ]),
     ])
 
+    # crash reports: listed per user, newest first
+    await _db.crash_logs.create_indexes([
+        IndexModel([("user_id", ASCENDING), ("received_at", DESCENDING)]),
+    ])
+
     # exercise catalog
     await _db.muscle_groups.create_indexes([
         IndexModel([("slug", ASCENDING)], unique=True),

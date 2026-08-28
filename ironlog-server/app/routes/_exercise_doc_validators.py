@@ -7,7 +7,10 @@ from fastapi import HTTPException, status
 
 from app.routes._catalog_validators import SLUG_RE
 
-LOCALE_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?$")
+# \Z, not $: "$" also matches before a trailing newline, and locale is
+# half of the unique (exercise_slug, locale) key -- "ru\n" would create
+# a second document that no locale=ru read ever returns.
+LOCALE_RE = re.compile(r"^[a-z]{2}(-[A-Z]{2})?\Z")
 VALID_DOC_STATUSES = {"draft", "reviewed", "deprecated"}
 VALID_MEDIA_KINDS = {"image", "video", "animation"}
 VALID_MEDIA_LICENSES = {"owned", "cc", "public_domain"}

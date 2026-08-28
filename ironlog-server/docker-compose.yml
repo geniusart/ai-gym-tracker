@@ -14,6 +14,8 @@ services:
       - MONGODB_URL=mongodb://mongo:27017
       - MONGODB_DB=ironlog
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      # Emails allowed to write the shared AI agent instructions.
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-}
     depends_on:
       - mongo
     restart: unless-stopped

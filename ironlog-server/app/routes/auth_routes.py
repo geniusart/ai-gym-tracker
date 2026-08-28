@@ -23,7 +23,7 @@ async def register(body: AuthRequest):
     try:
         result = await get_db().users.insert_one({
             "email": body.email,
-            "password_hash": hash_password(body.password),
+            "password_hash": await hash_password(body.password),
         })
     except DuplicateKeyError:
         raise HTTPException(
@@ -38,7 +38,9 @@ async def register(body: AuthRequest):
 @router.post("/login", response_model=AuthResponse)
 async def login(body: AuthRequest):
     user = await get_db().users.find_one({"email": body.email})
-    if not user or not verify_password(body.password, user["password_hash"]):
+    if not user or not await verify_password(
+        body.password, user["password_hash"]
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",

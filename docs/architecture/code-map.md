@@ -36,7 +36,7 @@ left to rot.
 - **Technique flows** are stateless: a `TechniqueFlow` reads `isCompleted` flags
   and returns the next `TechniqueStep`; the view model owns mutable state.
 - **Pure-Python modules** on the server are prefixed `_` (`_analytics_helpers`,
-  `_catalog_validators`, `_exercise_doc_validators`) -- no DB, no app stack, so
+  `_catalog_validators`, `_exercise_doc_validators`, `_request_body`) -- no DB, no app stack, so
   they are unit-testable in isolation.
 - **PlanType** enum must stay in sync: server `PlanType` (`app/schemas/__init__.py`)
   and client `PlanType`/`SchemaRegistry` (`Services/SchemaRegistry.swift`).
@@ -151,7 +151,8 @@ left to rot.
 | `IronLog/IronLog/Views/Workout/DebugLogView.swift` | `#DEBUG`-only raw JSON view of the current workout export. | - |
 | `IronLog/IronLog/Views/History/WorkoutHistoryView.swift` | Merges strength + cycling sessions into one chronological list; per-workout detail, manual re-sync, delete. | - |
 | `IronLog/IronLog/Views/Settings/SettingsView.swift` | Auth (register/login/logout), server URL config, connection test, sync status. | - |
-| `IronLog/IronLog/Views/Components/CockpitStyle.swift` | Theme palette + `CockpitPanel` container + `CockpitChip` badge. | - |
+| `IronLog/IronLog/Views/Components/CockpitStyle.swift` | Theme palette + `CockpitPanel` container + `CockpitChip` badge; `SetTypeStyle` / `TechniqueStyle` set-type and technique label+tint maps. | - |
+| `IronLog/IronLog/Shared/WorkoutFormatting.swift` | Weight and duration formatting shared by the app, widgets and watch targets. | - |
 | `IronLog/IronLog/Views/Components/SlideButton.swift` | Drag-to-confirm button (e.g. slide to start a set). | - |
 
 ## watchOS app (`IronLogWatch`)
@@ -218,7 +219,8 @@ left to rot.
 | `ironlog-server/app/routes/agent_instructions.py` | Serves AI plan-import instructions (`/agent-instructions/plan-import[.json]`) from DB or fallback file. | - |
 | `ironlog-server/app/routes/_catalog_validators.py` | Pure validators for exercise/muscle payloads (slug regex, body-part/equipment/plan-type enums, normalize). | `test_catalog_validation` |
 | `ironlog-server/app/routes/_exercise_doc_validators.py` | Pure validators for exercise-doc payloads (fields, locale, status, media, sources, normalize). | `test_exercise_doc_validation` |
-| `ironlog-server/app/routes/_analytics_helpers.py` | Pure math: `epley_1rm`, `workout_metrics`, `best_set_of`, `relative_delta_pct`, `split_window`, `week_start`, `parse_iso`. | `test_analytics_helpers` |
+| `ironlog-server/app/routes/_analytics_helpers.py` | Pure math + date/number coercion: `epley_1rm`, `workout_metrics`, `best_set_of`, `relative_delta_pct`, `split_window`, `split_window_avg`, `window_is_covered`, `week_start`, `parse_iso`, `to_utc`, `utc_isoformat`, `as_number`. | `test_analytics_helpers` |
+| `ironlog-server/app/routes/_request_body.py` | Shared raw-JSON body parsing for routes without a pydantic model (`read_json_object`, `read_optional_json_object`); one 422 contract for every such endpoint. | `test_routes` |
 
 ## Tools and seed data
 
@@ -234,7 +236,7 @@ left to rot.
 
 | File | Tests | Covers |
 |---|---|---|
-| `ironlog-server/tests/test_analytics_helpers.py` | 21 | pure analytics math edge cases. |
+| `ironlog-server/tests/test_analytics_helpers.py` | 39 | pure analytics math edge cases + date/number coercion of raw log values. |
 | `ironlog-server/tests/test_base_validator.py` | 8 | shared base contract. |
 | `ironlog-server/tests/test_strength_validator.py` | 13 | strength structure + enums. |
 | `ironlog-server/tests/test_strength_warnings.py` | 7 | soft `catalog_id` warnings. |
@@ -242,7 +244,7 @@ left to rot.
 | `ironlog-server/tests/test_catalog_validation.py` | 20 | exercise/muscle payload validation + normalization. |
 | `ironlog-server/tests/test_exercise_doc_validation.py` | 8 | exercise-doc payload validation. |
 | `ironlog-server/tests/test_catalog_seed.py` | 18 | seed insert/upsert/preserve behavior. |
-| `ironlog-server/tests/test_routes.py` | 11 | route contracts (auth, plans, log, catalog, analytics) over an in-memory fake DB. |
+| `ironlog-server/tests/test_routes.py` | 21 | route contracts (auth, plans, log, catalog, analytics) over an in-memory fake DB. |
 | `ironlog-server/tests/conftest.py` | - | shared pytest fixtures (fake DB, sample payloads). |
 
 ## Endpoint map
@@ -281,7 +283,7 @@ Auth column: JWT = requires `Authorization: Bearer`; none = public.
 | GET | `/agent-instructions` | none | `agent_instructions.py` | List available agent instruction sets. |
 | GET | `/agent-instructions/plan-import` | none | `agent_instructions.py` | Plan-import instructions as markdown. |
 | GET | `/agent-instructions/plan-import.json` | none | `agent_instructions.py` | Plan-import instructions as JSON + live references. |
-| PUT | `/agent-instructions/plan-import` | JWT | `agent_instructions.py` | Update stored plan-import instructions. |
+| PUT | `/agent-instructions/plan-import` | JWT + admin | `agent_instructions.py` | Update stored plan-import instructions. Gated by `require_admin` (`ADMIN_EMAILS` setting or `is_admin` on the user doc) because the GET is unauthenticated. |
 
 ## MongoDB collections
 

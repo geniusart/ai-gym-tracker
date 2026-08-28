@@ -1,9 +1,13 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter, Depends, HTTPException, Query, Request, Response, status,
+)
 
-from app.auth import get_current_user, maybe_refresh_token
+from app.auth import attach_refreshed_token, get_current_user
 from app.database import get_db
+from app.routes._analytics_helpers import utc_isoformat
+from app.routes._request_body import read_json_object
 from app.schemas import PlanType
 
 router = APIRouter(tags=["log"])
@@ -15,20 +19,9 @@ async def post_log(
     response: Response,
     user: dict = Depends(get_current_user),
 ):
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
 
-    try:
-        data = await request.json()
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid JSON body",
-        )
-    if not isinstance(data, dict):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Log body must be an object",
-        )
+    data = await read_json_object(request, "Log body")
     workouts = data.get("workouts")
     if not isinstance(workouts, list) or len(workouts) == 0:
         raise HTTPException(
@@ -39,21 +32,29 @@ async def post_log(
     device_id = request.headers.get("X-Device-Id")
     user_agent = request.headers.get("User-Agent")
 
-    upserted = 0
     for w in workouts:
-        workout_id = w.get("id")
-        if not workout_id:
+        if not isinstance(w, dict) or not w.get("id"):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Each workout must have an 'id' field",
+                detail="Each workout must be an object with an 'id' field",
             )
+
+    # One catalog read for the whole batch. A week of offline sync is ~10
+    # workouts x 6-8 exercises, and the slugs repeat heavily between them.
+    catalog_body_parts = await _catalog_body_parts(workouts)
+
+    upserted = 0
+    for w in workouts:
+        workout_id = w["id"]
 
         # Denorm body_part on each strength exercise log entry so analytics
         # queries can group by body_part with a single index hit (no $lookup
         # to plans collection). Cycling logs have segments instead -- skip.
         if w.get("plan_type") == "strength":
             await _enrich_strength_exercises_with_body_part(
-                user_id=user["_id"], workout=w
+                user_id=user["_id"],
+                workout=w,
+                catalog_body_parts=catalog_body_parts,
             )
 
         doc = {**w, "user_id": user["_id"]}
@@ -78,22 +79,25 @@ async def get_log(
     since: str | None = None,
     template_id: str | None = None,
     type: PlanType | None = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
     user: dict = Depends(get_current_user),
 ):
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
 
     query: dict = {"user_id": user["_id"]}
 
     if since:
         try:
-            since_dt = datetime.fromisoformat(since)
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="since must be ISO8601 format",
             )
-        query["started_at"] = {"$gte": since_dt.isoformat()}
+        # `started_at` is stored as a string, so this range filter compares
+        # lexicographically: the bound has to be normalized to UTC, or a
+        # "+03:00" input silently excludes the "...Z" logs it should match.
+        query["started_at"] = {"$gte": utc_isoformat(since_dt)}
 
     if template_id:
         query["template_id"] = template_id
@@ -104,7 +108,7 @@ async def get_log(
     cursor = get_db().workout_logs.find(
         query,
         sort=[("started_at", -1)],
-    ).limit(min(limit, 200))
+    ).limit(limit)
 
     results = []
     async for doc in cursor:
@@ -120,7 +124,7 @@ async def delete_log(
     response: Response,
     user: dict = Depends(get_current_user),
 ):
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
 
     result = await get_db().workout_logs.delete_one(
         {"user_id": user["_id"], "id": workout_id},
@@ -135,9 +139,37 @@ async def delete_log(
 
 # MARK: - Body-part denorm middleware
 
+async def _catalog_body_parts(workouts: list) -> dict[str, str]:
+    """Resolve every `catalog_id` referenced by the batch in one query.
+
+    Looking each slug up individually turns a multi-workout sync into
+    dozens of sequential round-trips for a catalog of ~30 rows whose slugs
+    repeat across workouts.
+    """
+    slugs = {
+        ex["catalog_id"]
+        for w in workouts
+        if w.get("plan_type") == "strength"
+        for ex in (w.get("exercises") or [])
+        if isinstance(ex, dict) and ex.get("catalog_id")
+    }
+    if not slugs:
+        return {}
+    cursor = get_db().exercises.find(
+        {"slug": {"$in": list(slugs)}},
+        projection={"slug": 1, "body_part": 1, "_id": 0},
+    )
+    return {
+        doc["slug"]: doc["body_part"]
+        async for doc in cursor
+        if doc.get("body_part")
+    }
+
+
 async def _enrich_strength_exercises_with_body_part(
     user_id: str,
     workout: dict,
+    catalog_body_parts: dict[str, str],
 ) -> None:
     """Mutates each entry in `workout["exercises"]` adding `body_part`.
 
@@ -190,15 +222,8 @@ async def _enrich_strength_exercises_with_body_part(
             # Already populated by client -- respect it.
             continue
 
-        body_part: str | None = None
         cid = ex_log.get("catalog_id")
-        if cid:
-            cat = await db.exercises.find_one(
-                {"slug": cid},
-                projection={"body_part": 1, "_id": 0},
-            )
-            if cat:
-                body_part = cat.get("body_part")
+        body_part = catalog_body_parts.get(cid) if cid else None
 
         if not body_part:
             await _load_plan_exercises_once()
@@ -209,10 +234,3 @@ async def _enrich_strength_exercises_with_body_part(
         if body_part:
             ex_log["body_part"] = body_part
 
-
-def _attach_refreshed_token(user: dict, response: Response | None) -> None:
-    payload = user.get("_token_payload")
-    if payload and response:
-        new_token = maybe_refresh_token(payload)
-        if new_token:
-            response.headers["X-Refreshed-Token"] = new_token

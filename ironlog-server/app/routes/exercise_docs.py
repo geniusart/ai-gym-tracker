@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.routes._request_body import read_json_object
 from app.routes._exercise_doc_validators import (
     VALID_DOC_STATUSES,
     normalize_exercise_doc,
@@ -117,18 +118,7 @@ async def upsert_exercise_doc(
     validate_locale(locale)
     await _ensure_exercise_exists(slug)
 
-    try:
-        payload = await request.json()
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid JSON body",
-        )
-    if not isinstance(payload, dict):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Exercise document body must be an object",
-        )
+    payload = await read_json_object(request, "Exercise document body")
     validate_exercise_doc_payload_shape(payload)
     await _verify_alternative_slugs_exist(payload.get("alternative_slugs", []))
     replaced_by = payload.get("replaced_by")

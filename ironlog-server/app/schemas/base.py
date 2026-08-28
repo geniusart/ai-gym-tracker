@@ -34,6 +34,15 @@ def validate_base(data: dict) -> None:
             detail="plan_version must be a positive integer",
         )
 
+    # plan_type is used as a dict key against SCHEMA_REGISTRY straight
+    # after this call, so an unhashable value here becomes a TypeError
+    # and a 500 rather than the 422 the caller is meant to get.
+    if not isinstance(data["plan_type"], str) or not data["plan_type"].strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="plan_type must be a non-empty string",
+        )
+
     if not isinstance(data["schema"], str) or not data["schema"].strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

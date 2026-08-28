@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response
 
-from app.auth import get_current_user, maybe_refresh_token
+from app.auth import attach_refreshed_token, get_current_user
 from app.database import get_db
+from app.routes._request_body import read_json_object
 
 router = APIRouter(tags=["crash"])
 
@@ -20,21 +21,9 @@ async def post_crash(
     field-by-field: the goal is to capture as much as possible even
     if the format evolves. We only enforce that the body is an object.
     """
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
 
-    try:
-        data = await request.json()
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Body must be valid JSON",
-        )
-
-    if not isinstance(data, dict):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Body must be a JSON object",
-        )
+    data = await read_json_object(request, "Crash report body")
 
     doc = {
         **data,
@@ -53,17 +42,17 @@ async def post_crash(
 
 @router.get("/crashes")
 async def list_crashes(
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
     user: dict = Depends(get_current_user),
     response: Response = None,
 ):
     """List recent crash reports for the current user."""
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
 
     cursor = get_db().crash_logs.find(
         {"user_id": user["_id"]},
         sort=[("received_at", -1)],
-    ).limit(min(limit, 200))
+    ).limit(limit)
 
     results = []
     async for doc in cursor:
@@ -72,10 +61,3 @@ async def list_crashes(
         results.append(doc)
     return results
 
-
-def _attach_refreshed_token(user: dict, response: Response | None) -> None:
-    payload = user.get("_token_payload")
-    if payload and response:
-        new_token = maybe_refresh_token(payload)
-        if new_token:
-            response.headers["X-Refreshed-Token"] = new_token

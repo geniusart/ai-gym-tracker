@@ -27,21 +27,33 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.auth import get_current_user, maybe_refresh_token
+from app.auth import attach_refreshed_token, get_current_user
 from app.database import get_db
 from app.routes._analytics_helpers import (
+    as_number,
     parse_iso,
     relative_delta_pct,
     split_window,
+    split_window_avg,
+    to_utc,
+    utc_isoformat,
     week_start,
+    window_is_covered,
     workout_metrics,
 )
 
 router = APIRouter(tags=["analytics"], prefix="/analytics/strength")
 
 
-# Default lookback when caller does not pass `since`.
-_DEFAULT_LOOKBACK_DAYS = 120
+# Default lookback when caller does not pass `since`. Must be at least
+# twice the widest comparison window (90 days) so the prior half of that
+# comparison is backed by data instead of by the edge of the fetch.
+_DEFAULT_LOOKBACK_DAYS = 180
+
+# Set types excluded from volume. Everything else -- drop sets, myo-reps,
+# rest-pause continuations, backoff sets -- is real work the plans
+# prescribe and the client logs, so it counts toward tonnage.
+_EXCLUDED_SET_TYPES = ["warmup"]
 
 
 # MARK: - Exercise progress -------------------------------------------------
@@ -49,7 +61,7 @@ _DEFAULT_LOOKBACK_DAYS = 120
 @router.get("/exercise-progress")
 async def exercise_progress(
     since: str | None = Query(default=None, description=(
-        "ISO 8601 date/datetime. Defaults to now - 120 days."
+        "ISO 8601 date/datetime. Defaults to now - 180 days."
     )),
     plan_id: str | None = Query(default=None, description=(
         "Optional: restrict to a specific plan_id."
@@ -61,7 +73,7 @@ async def exercise_progress(
 
     Group key: `catalog_id` if present in the log, else `<plan_id>/<exercise_id>`.
     """
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
     since_dt, now = _parse_window(since)
 
     raw = await _fetch_strength_working_sets(
@@ -86,31 +98,33 @@ async def exercise_progress(
         bucket["catalog_id"] = r["catalog_id"]
         bucket["body_part"] = r["body_part"]
 
-    # Roll up per (key, workout) -> per key
+    # Roll up per (key, workout) -> per key. `rows` pairs each point with
+    # its parsed date so ordering and window math use the real instant,
+    # not the ISO string (which sorts "+03:00" after "Z" for the same moment).
     per_key: dict[str, dict] = defaultdict(lambda: {
-        "points": [],
+        "rows": [],
         "exercise_name": None,
         "catalog_id": None,
         "body_part": None,
     })
     for (key, wid), b in by_key_workout.items():
         m = workout_metrics(b["sets"])
-        per_key[key]["points"].append({
-            "date": _to_iso(b["date"]),
+        per_key[key]["rows"].append((b["date"], {
+            "date": b["date"].isoformat(),
             "workout_id": wid,
             "volume": m["volume"],
             "est_1rm": _round(m["est_1rm"]),
             "best_set": m["best_set"],
             "working_sets": m["working_sets"],
-        })
+        }))
         # Keep latest non-null metadata
         per_key[key]["exercise_name"] = b["exercise_name"] or per_key[key]["exercise_name"]
         per_key[key]["catalog_id"] = b["catalog_id"] or per_key[key]["catalog_id"]
         per_key[key]["body_part"] = b["body_part"] or per_key[key]["body_part"]
 
     # Sort points within each key by date asc
-    for key, payload in per_key.items():
-        payload["points"].sort(key=lambda p: p["date"])
+    for payload in per_key.values():
+        payload["rows"].sort(key=lambda row: row[0])
 
     # Resolve catalog metadata (display_name + primary_muscles) where possible
     catalog_lookup = await _catalog_lookup_for_keys(per_key.keys())
@@ -123,29 +137,22 @@ async def exercise_progress(
         body_part = (cat or {}).get("body_part") or payload["body_part"]
         primary_muscles = (cat or {}).get("primary_muscles") or []
 
-        # Compute deltas (volume + est_1rm) over 30 / 90 day windows
-        volume_pts = [
-            {"date": p["date"], "value": p["volume"]} for p in payload["points"]
-        ]
+        rows = payload["rows"]
+        points = [p for _, p in rows]
+
+        # Compute deltas (volume + est_1rm) over 30 / 90 day windows.
+        # A delta is only reported when the fetch window covers the prior
+        # half too -- otherwise a full recent window is compared against a
+        # truncated baseline and reads as growth that never happened.
+        volume_pts = [{"date": d, "value": p["volume"]} for d, p in rows]
         rec_v_30, prior_v_30 = split_window(volume_pts, days=30, now=now)
         rec_v_90, prior_v_90 = split_window(volume_pts, days=90, now=now)
 
         e1rm_pts = [
-            {"date": p["date"], "value": p["est_1rm"]}
-            for p in payload["points"] if p["est_1rm"] is not None
+            {"date": d, "value": p["est_1rm"]}
+            for d, p in rows if p["est_1rm"] is not None
         ]
-        # For est_1rm, we want avg-of-window not sum -- use point count to recover
-        rec_v_e30, prior_v_e30 = split_window(e1rm_pts, days=30, now=now)
-        rec_n_e30 = sum(
-            1 for p in e1rm_pts
-            if parse_iso(p["date"]) > now - timedelta(days=30)
-        )
-        prior_n_e30 = sum(
-            1 for p in e1rm_pts
-            if now - timedelta(days=60)
-            < parse_iso(p["date"])
-            <= now - timedelta(days=30)
-        )
+        rec_avg_e30, prior_avg_e30 = split_window_avg(e1rm_pts, days=30, now=now)
 
         out.append({
             "key": key,
@@ -153,12 +160,16 @@ async def exercise_progress(
             "display_name": display_name,
             "body_part": body_part,
             "primary_muscles": primary_muscles,
-            "points": payload["points"],
+            "points": points,
             "deltas": {
-                "volume_pct_30d": relative_delta_pct(rec_v_30, prior_v_30),
-                "volume_pct_90d": relative_delta_pct(rec_v_90, prior_v_90),
-                "est_1rm_pct_30d": _avg_delta_pct(
-                    rec_v_e30, rec_n_e30, prior_v_e30, prior_n_e30,
+                "volume_pct_30d": _delta_if_covered(
+                    rec_v_30, prior_v_30, since=since_dt, now=now, days=30,
+                ),
+                "volume_pct_90d": _delta_if_covered(
+                    rec_v_90, prior_v_90, since=since_dt, now=now, days=90,
+                ),
+                "est_1rm_pct_30d": _delta_if_covered(
+                    rec_avg_e30, prior_avg_e30, since=since_dt, now=now, days=30,
                 ),
             },
         })
@@ -179,7 +190,7 @@ async def body_parts(
     response: Response = None,
 ):
     """Weekly volume per body part + 30/90-day relative deltas."""
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
     now = datetime.now(timezone.utc)
     since_dt = now - timedelta(weeks=weeks)
 
@@ -200,26 +211,37 @@ async def body_parts(
         if not bp:
             continue
         wid = r["workout_id"]
-        d = r["date"] if isinstance(r["date"], datetime) else parse_iso(r["date"])
+        d = r["date"]
         workout_dates[wid] = d
-        weight = r["weight_kg"] if r["weight_kg"] is not None else 0
-        reps = r["reps"] if r["reps"] is not None else 0
-        if weight <= 0 or reps <= 0:
+        weight = r["weight_kg"]
+        reps = r["reps"]
+        # Same validity rule as `workout_metrics`: weight may be 0 (body-
+        # weight work is real training volume), reps may not. Rejecting
+        # weight == 0 here used to drop whole body parts -- a back session
+        # of pull-ups simply vanished from this endpoint.
+        if weight is None or reps is None or weight < 0 or reps <= 0:
             continue
         by_bp_workout[(bp, wid)] += weight * reps
         by_bp_workout_sets[(bp, wid)] += 1
         if d >= cutoff_30d_for_exercises:
             bp_exercises[bp].add(r["group_key"])
 
-    # Aggregate to weekly bins per body_part
+    # Aggregate to weekly bins per body_part (for the chart), and keep the
+    # per-workout points (for the deltas). Windows must be measured on the
+    # real workout date: a bin labelled with its Monday can sit up to six
+    # days away from the workout it holds, which is enough to push a
+    # session inside the 30-day window into the prior one.
     weekly: dict[str, dict[str, dict]] = defaultdict(
         lambda: defaultdict(lambda: {"volume": 0.0, "working_sets": 0})
     )
+    bp_points: dict[str, list[dict]] = defaultdict(list)
     for (bp, wid), vol in by_bp_workout.items():
-        ws = week_start(workout_dates[wid])
-        bin_ = weekly[bp][ws.isoformat()]
+        d = workout_dates[wid]
+        sets = by_bp_workout_sets[(bp, wid)]
+        bp_points[bp].append({"date": d, "value": vol, "sets": sets})
+        bin_ = weekly[bp][week_start(d).isoformat()]
         bin_["volume"] += vol
-        bin_["working_sets"] += by_bp_workout_sets[(bp, wid)]
+        bin_["working_sets"] += sets
 
     # Pre-build the full set of week_start labels in the window (so we can
     # render a stable x-axis even if some weeks have no data).
@@ -241,34 +263,31 @@ async def body_parts(
             for w in all_week_starts
         ]
 
-        # Deltas over 30/90 day windows on volume series
-        vol_pts = [
-            {"date": p["week_start"] + "T00:00:00+00:00", "value": p["volume"]}
-            for p in weekly_volume
-        ]
-        rec_30, prior_30 = split_window(vol_pts, days=30, now=now)
-        rec_90, prior_90 = split_window(vol_pts, days=90, now=now)
+        # Deltas over 30/90 day windows, measured on per-workout points
+        pts = bp_points[bp]
+        rec_30, prior_30 = split_window(pts, days=30, now=now)
+        rec_90, prior_90 = split_window(pts, days=90, now=now)
 
-        # Sets per week avg over the recent 30 days
+        # Sets per week over the recent 30 days. The divisor is the window
+        # itself (30/7 weeks), not the number of Monday labels inside it --
+        # that count flips between 4 and 5 depending on today's weekday and
+        # moved this average by 20% overnight with unchanged data.
         cutoff_30 = now - timedelta(days=30)
-        sets_in_30d = sum(
-            p["working_sets"]
-            for p in weekly_volume
-            if parse_iso(p["week_start"] + "T00:00:00+00:00") > cutoff_30
-        )
-        weeks_in_30d = max(1, sum(
-            1 for p in weekly_volume
-            if parse_iso(p["week_start"] + "T00:00:00+00:00") > cutoff_30
-        ))
+        sets_in_30d = sum(p["sets"] for p in pts if p["date"] > cutoff_30)
 
         out.append({
             "body_part": bp,
             "weekly_volume": weekly_volume,
+            "volume_30d": round(rec_30, 2),
             "deltas": {
-                "volume_pct_30d": relative_delta_pct(rec_30, prior_30),
-                "volume_pct_90d": relative_delta_pct(rec_90, prior_90),
+                "volume_pct_30d": _delta_if_covered(
+                    rec_30, prior_30, since=since_dt, now=now, days=30,
+                ),
+                "volume_pct_90d": _delta_if_covered(
+                    rec_90, prior_90, since=since_dt, now=now, days=90,
+                ),
             },
-            "sets_per_week_avg_30d": round(sets_in_30d / weeks_in_30d, 1),
+            "sets_per_week_avg_30d": round(sets_in_30d / (30 / 7), 1),
             "exercises_count_30d": len(bp_exercises.get(bp, set())),
         })
 
@@ -288,7 +307,7 @@ async def overview(
 ):
     """Headline summary: top progressing exercises (by volume %), body-part
     snapshot, total workouts in window."""
-    _attach_refreshed_token(user, response)
+    attach_refreshed_token(user, response)
     now = datetime.now(timezone.utc)
     since_dt = now - timedelta(weeks=weeks)
 
@@ -321,11 +340,7 @@ async def overview(
 
     body_part_summary = {
         row["body_part"]: {
-            "volume_30d": sum(
-                p["volume"] for p in row["weekly_volume"]
-                if parse_iso(p["week_start"] + "T00:00:00+00:00")
-                > now - timedelta(days=30)
-            ),
+            "volume_30d": row["volume_30d"],
             "volume_pct_30d": row["deltas"]["volume_pct_30d"],
             "sets_per_week_avg_30d": row["sets_per_week_avg_30d"],
         }
@@ -336,7 +351,7 @@ async def overview(
     workouts_count = await get_db().workout_logs.count_documents({
         "user_id": user["_id"],
         "plan_type": "strength",
-        "started_at": {"$gte": since_dt.isoformat()},
+        "started_at": {"$gte": utc_isoformat(since_dt)},
     })
 
     return {
@@ -363,7 +378,7 @@ async def _fetch_strength_working_sets(
     match: dict = {
         "user_id": user_id,
         "plan_type": "strength",
-        "started_at": {"$gte": since.isoformat()},
+        "started_at": {"$gte": utc_isoformat(since)},
     }
     if plan_id:
         match["plan_id"] = plan_id
@@ -372,7 +387,10 @@ async def _fetch_strength_working_sets(
         {"$match": match},
         {"$unwind": "$exercises"},
         {"$unwind": "$exercises.sets"},
-        {"$match": {"exercises.sets.set_type": "working"}},
+        # `$nin` (rather than `$eq: "working"`) also keeps sets whose
+        # `set_type` is absent -- the export schema declares "working" as
+        # that field's default.
+        {"$match": {"exercises.sets.set_type": {"$nin": _EXCLUDED_SET_TYPES}}},
         {"$project": {
             "_id": 0,
             "workout_id": "$id",
@@ -389,20 +407,30 @@ async def _fetch_strength_working_sets(
 
     raw = []
     async for doc in get_db().workout_logs.aggregate(pipeline):
-        # Defensive normalization: older logs (predating Phase A2) may not
-        # carry every projected field. Make sure every dict has the keys
-        # downstream code reads, defaulting to None.
+        # Defensive normalization: logs are stored as raw client JSON, so
+        # older entries (predating Phase A2) may not carry every projected
+        # field, and `started_at` / `weight_kg` / `reps` can hold a naive
+        # date, a string, or nothing at all. Coerce once here so no
+        # downstream comparison can raise on the shape of a single log.
+        date = to_utc(doc.get("date"))
+        if date is None:
+            continue
+        # BSON stores integers written as `10.0` by a client as a double;
+        # keep whole rep counts as ints so responses stay `"reps": 10`.
+        reps = as_number(doc.get("reps"))
+        if reps is not None and reps.is_integer():
+            reps = int(reps)
         cid = doc.get("catalog_id")
         normalized = {
             "workout_id": doc.get("workout_id"),
-            "date": doc.get("date"),
+            "date": date,
             "plan_id": doc.get("plan_id"),
             "exercise_id": doc.get("exercise_id"),
             "exercise_name": doc.get("exercise_name"),
             "catalog_id": cid,
             "body_part": doc.get("body_part"),
-            "weight_kg": doc.get("weight_kg"),
-            "reps": doc.get("reps"),
+            "weight_kg": as_number(doc.get("weight_kg")),
+            "reps": reps,
             "group_key": (
                 cid if cid
                 else f'{doc.get("plan_id", "?")}/{doc.get("exercise_id", "?")}'
@@ -439,38 +467,35 @@ def _parse_window(since: str | None) -> tuple[datetime, datetime]:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="`since` must be ISO 8601 (e.g. 2026-04-01 or with time)",
             )
-        if since_dt.tzinfo is None:
-            since_dt = since_dt.replace(tzinfo=timezone.utc)
+        # Naive input means UTC; an explicit offset is converted, so the
+        # string bound sent to Mongo compares against stored "...Z" values.
+        since_dt = to_utc(since_dt)
     else:
         since_dt = now - timedelta(days=_DEFAULT_LOOKBACK_DAYS)
     return since_dt, now
-
-
-def _to_iso(d) -> str:
-    if isinstance(d, datetime):
-        return d.isoformat()
-    return str(d)
 
 
 def _round(v):
     return round(v, 2) if isinstance(v, (int, float)) else v
 
 
-def _avg_delta_pct(
-    recent_sum: float, recent_n: int,
-    prior_sum: float, prior_n: int,
+def _delta_if_covered(
+    recent: float | None,
+    prior: float | None,
+    *,
+    since: datetime,
+    now: datetime,
+    days: int,
 ) -> float | None:
-    """For est_1rm we want average-vs-average, not sum-vs-sum."""
-    if prior_n == 0 or recent_n == 0:
+    """`relative_delta_pct`, reported only when the fetch window reaching
+    back to `since` covers the prior comparison window in full.
+
+    Returning None makes the client render "no comparison data", which is
+    honest; comparing against a partially covered baseline is not.
+    """
+    if recent is None or prior is None:
         return None
-    recent_avg = recent_sum / recent_n
-    prior_avg = prior_sum / prior_n
-    return relative_delta_pct(recent_avg, prior_avg)
+    if not window_is_covered(since, now, days):
+        return None
+    return relative_delta_pct(recent, prior)
 
-
-def _attach_refreshed_token(user: dict, response: Response | None) -> None:
-    payload = user.get("_token_payload")
-    if payload and response:
-        new_token = maybe_refresh_token(payload)
-        if new_token:
-            response.headers["X-Refreshed-Token"] = new_token

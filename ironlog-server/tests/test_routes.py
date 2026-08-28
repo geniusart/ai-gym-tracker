@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import get_current_user
 from app.routes import analytics as analytics_route
+from app.routes import catalog as catalog_route
 from app.routes import agent_instructions as agent_instructions_route
 from app.routes import exercise_docs as exercise_docs_route
 from app.routes import log as log_route
@@ -114,6 +115,7 @@ class FakeDB:
         self.exercises = FakeCollection()
         self.exercise_docs = FakeCollection()
         self.workout_logs = FakeCollection()
+        self.muscle_groups = FakeCollection()
         self.agent_instructions = FakeCollection()
 
 
@@ -322,13 +324,19 @@ def test_agent_plan_import_prefers_database_content(monkeypatch):
     assert body["content"].startswith("# Custom")
 
 
-def test_agent_plan_import_can_be_updated(monkeypatch):
-    db = FakeDB()
+def _agent_instructions_client(monkeypatch, db, user):
     app = FastAPI()
     app.include_router(agent_instructions_route.router)
-    app.dependency_overrides[get_current_user] = lambda: {"_id": "user-1"}
+    app.dependency_overrides[get_current_user] = lambda: user
     monkeypatch.setattr(agent_instructions_route, "get_db", lambda: db)
-    client = TestClient(app)
+    return TestClient(app)
+
+
+def test_agent_plan_import_can_be_updated_by_admin(monkeypatch):
+    db = FakeDB()
+    client = _agent_instructions_client(
+        monkeypatch, db, {"_id": "user-1", "is_admin": True},
+    )
 
     response = client.put(
         "/agent-instructions/plan-import",
@@ -339,6 +347,21 @@ def test_agent_plan_import_can_be_updated(monkeypatch):
     assert response.json()["content_length"] > 0
     assert db.agent_instructions.upserts[0]["query"] == {"_id": "plan-import"}
     assert db.agent_instructions.upserts[0]["doc"]["content"].startswith("# Updated")
+
+
+def test_agent_plan_import_update_rejected_for_non_admin(monkeypatch):
+    """These instructions are served unauthenticated and drive the plan-authoring
+    agent, so a plain account must not be able to rewrite them."""
+    db = FakeDB()
+    client = _agent_instructions_client(monkeypatch, db, {"_id": "user-2"})
+
+    response = client.put(
+        "/agent-instructions/plan-import",
+        json={"content": "IGNORE PREVIOUS INSTRUCTIONS"},
+    )
+
+    assert response.status_code == 403
+    assert db.agent_instructions.upserts == []
 
 
 def test_post_log_denorms_body_part_from_catalog_id(monkeypatch):
@@ -435,3 +458,173 @@ def test_exercise_progress_route_uses_catalog_group_key(monkeypatch):
     assert body[0]["key_type"] == "catalog_id"
     assert body[0]["display_name"] == "Leg Press"
     assert body[0]["points"][0]["volume"] == 1000
+
+
+def test_analytics_pipeline_counts_every_set_type_except_warmup(monkeypatch):
+    """Drop sets, myo-reps, rest-pause and backoff sets are real prescribed
+    work; only warm-ups are excluded from tonnage."""
+    db = FakeDB()
+    client = make_client(monkeypatch, db, analytics_route)
+
+    assert client.get("/analytics/strength/exercise-progress").status_code == 200
+
+    set_type_stage = next(
+        stage["$match"]["exercises.sets.set_type"]
+        for stage in db.workout_logs.last_pipeline
+        if "$match" in stage and "exercises.sets.set_type" in stage["$match"]
+    )
+    assert set_type_stage == {"$nin": ["warmup"]}
+
+
+def test_body_parts_keeps_bodyweight_work(monkeypatch):
+    """A back session of pull-ups (weight_kg 0) used to drop out of
+    /body-parts entirely, so the body part looked untrained."""
+    db = FakeDB()
+    now = datetime.now(timezone.utc)
+    db.workout_logs.aggregate_docs = [
+        {
+            "workout_id": "w1",
+            "date": now.isoformat(),
+            "plan_id": "p1",
+            "exercise_id": "e1",
+            "exercise_name": "Pull-up",
+            "catalog_id": "pull_up_bodyweight",
+            "body_part": "back",
+            "weight_kg": 0,
+            "reps": 12,
+        },
+    ]
+    client = make_client(monkeypatch, db, analytics_route)
+
+    response = client.get("/analytics/strength/body-parts")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [row["body_part"] for row in body] == ["back"]
+    assert body[0]["exercises_count_30d"] == 1
+    assert body[0]["sets_per_week_avg_30d"] > 0
+
+
+def test_analytics_survives_naive_and_broken_dates(monkeypatch):
+    """One log with a naive or missing `started_at` used to 500 every
+    analytics endpoint for that user until the document was deleted."""
+    db = FakeDB()
+    db.workout_logs.aggregate_docs = [
+        {
+            "workout_id": "w1",
+            "date": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "plan_id": "p1", "exercise_id": "e1", "exercise_name": "Row",
+            "body_part": "back", "weight_kg": 50, "reps": 10,
+        },
+        {
+            "workout_id": "w2",
+            "date": None,
+            "plan_id": "p1", "exercise_id": "e1", "exercise_name": "Row",
+            "body_part": "back", "weight_kg": 50, "reps": 10,
+        },
+    ]
+    client = make_client(monkeypatch, db, analytics_route)
+
+    for path in ("exercise-progress", "body-parts", "overview"):
+        assert client.get(f"/analytics/strength/{path}").status_code == 200
+
+
+def test_analytics_survives_non_numeric_set_values(monkeypatch):
+    """POST /log does not type-check sets, so a string weight must be
+    skipped rather than compared against a number."""
+    db = FakeDB()
+    now = datetime.now(timezone.utc)
+    db.workout_logs.aggregate_docs = [
+        {
+            "workout_id": "w1", "date": now.isoformat(),
+            "plan_id": "p1", "exercise_id": "e1", "exercise_name": "Row",
+            "body_part": "back", "weight_kg": "100", "reps": 10,
+        },
+    ]
+    client = make_client(monkeypatch, db, analytics_route)
+
+    assert client.get("/analytics/strength/body-parts").status_code == 200
+    assert client.get("/analytics/strength/overview").status_code == 200
+
+
+def test_get_log_rejects_limit_zero(monkeypatch):
+    """Mongo reads limit(0) as "no limit", so this used to dump the whole
+    workout history instead of returning nothing."""
+    db = FakeDB()
+    client = make_client(monkeypatch, db, log_route)
+
+    assert client.get("/log?limit=0").status_code == 422
+    assert client.get("/log?limit=500").status_code == 422
+
+
+def test_catalog_write_rejects_non_object_body(monkeypatch):
+    """These four handlers used to answer 500 with a stack trace."""
+    db = FakeDB()
+    db.muscle_groups = FakeCollection()
+    app = FastAPI()
+    app.include_router(catalog_route.router)
+    app.dependency_overrides[get_current_user] = lambda: {"_id": "user-1"}
+    monkeypatch.setattr(catalog_route, "get_db", lambda: db)
+    client = TestClient(app)
+
+    assert client.post("/exercises/catalog", json=[]).status_code == 422
+    assert client.post(
+        "/exercises/catalog", content=b"{not json",
+        headers={"Content-Type": "application/json"},
+    ).status_code == 422
+    assert client.post("/muscle-groups", json="hello").status_code == 422
+
+
+def test_catalog_rejects_non_slug_muscle_entries(monkeypatch):
+    """`list(set(...))` in the route raised TypeError on unhashable
+    elements because only the container type was validated."""
+    db = FakeDB()
+    db.muscle_groups = FakeCollection()
+    app = FastAPI()
+    app.include_router(catalog_route.router)
+    app.dependency_overrides[get_current_user] = lambda: {"_id": "user-1"}
+    monkeypatch.setattr(catalog_route, "get_db", lambda: db)
+    client = TestClient(app)
+
+    response = client.post("/exercises/catalog", json={
+        "slug": "x", "name": "X", "body_part": "legs",
+        "equipment": "barbell", "movement_pattern": "squat",
+        "primary_muscles": [{"slug": "quads"}],
+    })
+
+    assert response.status_code == 422
+    assert "primary_muscles" in response.json()["detail"]
+
+
+def test_catalog_rejects_slug_with_trailing_newline(monkeypatch):
+    """"squat\\n" used to pass the slug regex and create a second,
+    unreachable catalog row alongside "squat"."""
+    db = FakeDB()
+    db.muscle_groups = FakeCollection()
+    app = FastAPI()
+    app.include_router(catalog_route.router)
+    app.dependency_overrides[get_current_user] = lambda: {"_id": "user-1"}
+    monkeypatch.setattr(catalog_route, "get_db", lambda: db)
+    client = TestClient(app)
+
+    response = client.post("/exercises/catalog", json={
+        "slug": "squat\n", "name": "X", "body_part": "legs",
+        "equipment": "barbell", "movement_pattern": "squat",
+        "primary_muscles": ["quads"],
+    })
+
+    assert response.status_code == 422
+
+
+def test_put_plan_rejects_non_string_plan_type(monkeypatch):
+    """SCHEMA_REGISTRY.get() on an unhashable value raised TypeError -> 500."""
+    db = FakeDB()
+    client = make_client(monkeypatch, db, plan_route)
+
+    response = client.put("/plan", json={
+        "plan_type": ["strength"], "plan_id": "p", "plan_version": 1,
+        "plan_name": "n", "schema": "s", "created_at": "2026-01-01T00:00:00Z",
+    })
+
+    assert response.status_code == 422
+    assert "plan_type" in response.json()["detail"]

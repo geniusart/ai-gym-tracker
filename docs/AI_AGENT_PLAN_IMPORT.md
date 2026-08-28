@@ -34,6 +34,11 @@ Authorization: Bearer <JWT>
 Content-Type: application/json
 ```
 
+This write is admin-only: the token's email must be listed in the server's
+`ADMIN_EMAILS` setting, or the user document must carry `is_admin: true`.
+The matching GET is unauthenticated, so anyone able to write here could feed
+arbitrary instructions to every agent that reads them.
+
 Body:
 
 ```json
