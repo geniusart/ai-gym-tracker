@@ -57,10 +57,11 @@ These prevent expensive mistakes a new agent could make in the first five
 minutes. When they conflict with a canonical doc, the canonical doc wins.
 
 1. **Commits and pushes require explicit user approval.** Work on the current
-   branch (`develop`); never push to `main` directly; never skip hooks. Do not
-   create a feature branch unless the user asks.
+   branch (`develop`, which is also the default); never push to `upstream`;
+   never skip hooks. Do not create a feature branch unless the user asks.
 2. **Production is live with real user data.** Deploying to the VPS
-   (`ssh root@v170184.hosted-by-vdsina.com`, `docker compose up --build -d` in
+   (`ironlog-server/deploy_tls_to_vps.sh`, which targets `root@89.110.84.41` =
+   `v170184.hosted-by-vdsina.com` and runs `docker compose up --build -d` in
    `/opt/ironlog`), running `tools/backfill_*` scripts, or `DELETE` against the
    production MongoDB all require explicit approval before acting.
 3. **Never commit, log, or paste secrets:** JWT secret, MongoDB credentials, the
@@ -126,10 +127,11 @@ documentation-only changes, tests are not required; check links and `git diff`.
 
 ## Git / PR Workflow
 
-- Remote `origin`: `github.com/geniuskld/ai-gym-tracker`. Default branch `main`;
-  active branch `develop`.
+- Remote `origin`: `github.com/geniusart/ai-gym-tracker` (public). `develop` is
+  both the default and the working branch; there is no `main`. The former
+  remote `github.com/geniuskld/ai-gym-tracker` is kept read-only as `upstream`.
 - Commit or push only when the user asks. End commit messages with the
-  `Co-Authored-By` trailer. Open PRs with `gh` against `main`.
+  `Co-Authored-By` trailer. Open PRs with `gh` against `develop`.
 
 ## Documentation Maintenance
 
