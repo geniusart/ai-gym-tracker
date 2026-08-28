@@ -389,12 +389,7 @@ private struct PerformingExerciseTitle: View {
     }
 
     private var setTypeLabel: (text: String, color: Color)? {
-        switch vm.currentSet?.type {
-        case "warmup": return ("Warmup", CockpitPalette.blue)
-        case "drop": return ("Drop", CockpitPalette.amber)
-        case "myo_mini": return ("Myo mini", CockpitPalette.magenta)
-        default: return nil
-        }
+        SetTypeStyle.badge(vm.currentSet?.type).map { ($0.label, $0.color) }
     }
 
     private func techniqueLabel(
@@ -504,8 +499,9 @@ private struct RestingPhaseView: View {
 
     private var nextInfo: NextSetInfo {
         if vm.isRestBeforeNextExercise {
-            let nextIdx = vm.currentExerciseIndex + 1
-            guard nextIdx < vm.exercises.count else {
+            // Must match the executor's walk: `currentExerciseIndex + 1` names
+            // the junior superset partner the user has already finished.
+            guard let nextIdx = vm.nextExerciseIndexAfterCurrentFlow() else {
                 return NextSetInfo(
                     eyebrow: "NEXT",
                     title: "Workout complete",
@@ -576,12 +572,7 @@ private struct RestingPhaseView: View {
     }
 
     private func setBadge(for type: String) -> NextSetBadge? {
-        switch type {
-        case "warmup": return NextSetBadge(text: "Warmup", color: CockpitPalette.blue)
-        case "drop": return NextSetBadge(text: "Drop", color: CockpitPalette.amber)
-        case "myo_mini": return NextSetBadge(text: "Myo mini", color: CockpitPalette.magenta)
-        default: return nil
-        }
+        SetTypeStyle.badge(type).map { NextSetBadge(text: $0.label, color: $0.color) }
     }
 
     private func techniqueBadge(for exercise: ExerciseState) -> NextSetBadge? {
@@ -614,8 +605,7 @@ private struct BetweenExercisesRestView: View {
     let nextInfo: NextSetInfo
 
     private var nextExerciseIndex: Int? {
-        let next = vm.currentExerciseIndex + 1
-        return vm.exercises.indices.contains(next) ? next : nil
+        vm.nextExerciseIndexAfterCurrentFlow()
     }
 
     private var scrollTargetIndex: Int? {
@@ -795,12 +785,7 @@ private struct ExerciseHeader: View {
     }
 
     private func techniqueBadgeColor(_ technique: String) -> Color {
-        switch technique {
-        case "drop_set":   return CockpitPalette.amber
-        case "rest_pause": return CockpitPalette.cyan
-        case "myo_reps":   return CockpitPalette.magenta
-        default:           return CockpitPalette.muted
-        }
+        TechniqueStyle.color(technique)
     }
 
     private func bodyPartLabel(_ part: String) -> String {
@@ -935,21 +920,11 @@ private struct SetRoadmap: View {
     }
 
     private func setTypeLabel(_ type: String) -> String {
-        switch type {
-        case "warmup": return "Warmup"
-        case "drop": return "Drop"
-        case "myo_mini": return "Myo mini"
-        default: return ""
-        }
+        SetTypeStyle.badge(type)?.label ?? ""
     }
 
     private func setTypeColor(_ type: String) -> Color {
-        switch type {
-        case "warmup": return CockpitPalette.blue
-        case "drop": return CockpitPalette.amber
-        case "myo_mini": return CockpitPalette.magenta
-        default: return CockpitPalette.muted
-        }
+        SetTypeStyle.badge(type)?.color ?? CockpitPalette.muted
     }
 }
 
@@ -2080,14 +2055,7 @@ private func formatted(_ value: Double) -> String {
 }
 
 private func formatWeight(_ kg: Double) -> String {
-    if kg.rounded() == kg {
-        return String(Int(kg))
-    }
-    let formatter = NumberFormatter()
-    formatter.minimumFractionDigits = 0
-    formatter.maximumFractionDigits = 1
-    formatter.decimalSeparator = "."
-    return formatter.string(from: NSNumber(value: kg)) ?? "\(kg)"
+    WorkoutFormatting.weight(kg)
 }
 
 // MARK: - Exercise Note Sheet

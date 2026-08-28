@@ -27,11 +27,17 @@ struct IronLogApp: App {
         do {
             return try ModelContainer(for: schema, configurations: [config])
         } catch {
-            // Schema migration failed -- typically a non-additive change like
-            // a stored property type swap (e.g. weightKg Int -> Double).
-            // Wipe the local SwiftData store and retry. Plans re-sync from
-            // the server on next launch; workout history is lost on device
-            // but preserved server-side (can be restored later).
+            // Retry once before doing anything destructive: a transient failure
+            // (file protection, disk pressure) is not a migration failure, and
+            // the wipe below deletes workouts that were never uploaded.
+            if let container = try? ModelContainer(for: schema, configurations: [config]) {
+                return container
+            }
+            // Persistent failure -- typically a non-additive schema change like
+            // a stored property type swap (e.g. weightKg Int -> Double). Wipe
+            // the local store and retry. Plans re-sync from the server; any
+            // workout that had already been uploaded can be restored, but an
+            // unsynced one is lost here.
             Self.wipeLocalStore()
             do {
                 return try ModelContainer(for: schema, configurations: [config])

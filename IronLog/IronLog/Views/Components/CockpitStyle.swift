@@ -122,3 +122,49 @@ struct CockpitIconButton: View {
         .foregroundStyle(.primary)
     }
 }
+
+// MARK: - Set type / technique styling
+
+/// Single source for how a set type and a technique are labelled and tinted.
+/// These maps used to be copied into each view and had drifted: the executor
+/// had no `rest_pause` case, so a rest-pause set showed no badge while running
+/// but a cyan "Rest" chip in history.
+enum SetTypeStyle {
+    static func badge(_ type: String?) -> (label: String, color: Color)? {
+        switch type {
+        case "warmup":     return ("Warmup", CockpitPalette.blue)
+        case "drop":       return ("Drop", CockpitPalette.amber)
+        case "myo_mini":   return ("Myo", CockpitPalette.magenta)
+        case "rest_pause": return ("Rest", CockpitPalette.cyan)
+        case "working", nil: return nil
+        case .some(let other): return (other.capitalized, CockpitPalette.muted)
+        }
+    }
+}
+
+enum TechniqueStyle {
+    /// `nil` for plain straight sets, which carry no badge.
+    static func badge(
+        _ technique: String?,
+        isSuperset: Bool = false
+    ) -> (label: String, color: Color, systemImage: String?)? {
+        if isSuperset || technique == "superset" {
+            return ("Superset", CockpitPalette.purple, "arrow.triangle.2.circlepath")
+        }
+        switch technique {
+        case "drop_set":   return ("Drop set", CockpitPalette.amber, nil)
+        case "rest_pause": return ("Rest-pause", CockpitPalette.cyan, nil)
+        case "myo_reps":   return ("Myo-reps", CockpitPalette.magenta, nil)
+        default:           return nil
+        }
+    }
+
+    /// Tint for stripes and dots, where a neutral fallback is wanted.
+    static func color(
+        _ technique: String?,
+        isSuperset: Bool = false,
+        fallback: Color = CockpitPalette.muted
+    ) -> Color {
+        badge(technique, isSuperset: isSuperset)?.color ?? fallback
+    }
+}

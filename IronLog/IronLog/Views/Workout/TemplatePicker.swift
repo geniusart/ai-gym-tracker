@@ -392,9 +392,15 @@ struct TemplatePicker: View {
 
     private func resumeStrengthWorkout(_ workout: SDWorkout) {
         let templateId = workout.templateId
-        let template = strengthPlans.flatMap(\.templates).first {
-            $0.templateId == templateId
-        }
+        let planId = workout.planId
+        // Template IDs are only unique within a plan, so prefer the workout's
+        // own plan. Matching on the id alone can resolve to another plan's
+        // template and silently re-attribute the logged sets to its exercises.
+        let candidates = strengthPlans
+            .filter { planId == nil || $0.planId == planId }
+            .flatMap(\.templates)
+        let template = candidates.first { $0.templateId == templateId }
+            ?? strengthPlans.flatMap(\.templates).first { $0.templateId == templateId }
         guard let template else {
             closeStrengthWorkout(
                 workout,
@@ -414,10 +420,13 @@ struct TemplatePicker: View {
 
     private func resumeCyclingWorkout(_ workout: SDCyclingWorkout) {
         let templateId = workout.templateId
-        // Find the matching plan + template
+        let planId = workout.planId
+        // Same plan-scoping rule as the strength path: template IDs are only
+        // unique within a plan.
         var resolvedPlan: SDCyclingPlan?
         var resolvedTemplate: SDCyclingTemplate?
-        for plan in cyclingPlans {
+        let ordered = cyclingPlans.sorted { lhs, _ in lhs.planId == planId }
+        for plan in ordered {
             if let t = plan.templates.first(where: { $0.templateId == templateId }) {
                 resolvedPlan = plan
                 resolvedTemplate = t

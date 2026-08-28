@@ -30,6 +30,16 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     DEVELOPMENT_TEAM: "W88C7J82R5"
+    # Kept here rather than in the generated project: these were set through
+    # the Xcode UI, and `xcodegen generate` reverted CODE_SIGN_IDENTITY to the
+    # legacy "iPhone Developer" string, which no longer resolves -- breaking
+    # device builds and archives.
+    CODE_SIGN_IDENTITY: "Apple Development"
+    CODE_SIGN_STYLE: Automatic
+    PROVISIONING_PROFILE_SPECIFIER: ""
+    DEAD_CODE_STRIPPING: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
 
 targets:
   IronLog:
@@ -41,6 +51,12 @@ targets:
       path: IronLog/IronLog.entitlements
       properties:
         com.apple.developer.healthkit: true
+        # Added through the Xcode UI; declared here so a regen keeps it.
+        # NOTE: `health-records` is a restricted entitlement and no code in
+        # the app reads clinical records -- worth removing before the next
+        # App Review submission.
+        com.apple.developer.healthkit.access:
+          - health-records
     info:
       path: IronLog/Info.plist
       properties:
@@ -50,8 +66,13 @@ targets:
         NSSupportsLiveActivities: true
         NSHealthUpdateUsageDescription: IronLog saves your strength and cycling workouts to Apple Health.
         NSHealthShareUsageDescription: IronLog reads your heart rate during cycling workouts so you can see live BPM and time-in-zone.
+        # `processing` and `fetch` were added through the Xcode UI. Declared
+        # here so a regen keeps them, but nothing registers a BGTask today,
+        # so they are currently inert.
         UIBackgroundModes:
           - workout-processing
+          - processing
+          - fetch
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.W88C7J82R5.ironlog
@@ -74,6 +95,7 @@ targets:
       - path: IronLogWidgets
       - path: IronLog/Services/RestTimerActivity.swift
       - path: IronLog/Services/CyclingActivity.swift
+      - path: IronLog/Shared/WorkoutFormatting.swift
     info:
       path: IronLogWidgets/Info.plist
       properties:
@@ -96,6 +118,10 @@ targets:
       path: IronLogWatch/IronLogWatch.entitlements
       properties:
         com.apple.developer.healthkit: true
+        # Both added through the Xcode UI -- see the note on the iOS target.
+        com.apple.developer.healthkit.access:
+          - health-records
+        com.apple.developer.healthkit.background-delivery: true
     info:
       path: IronLogWatch/Info.plist
       properties:

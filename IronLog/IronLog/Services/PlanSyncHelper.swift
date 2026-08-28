@@ -33,14 +33,25 @@ enum PlanSyncHelper {
     static func sync(context: ModelContext) async -> Error? {
         guard SyncService.isConfigured else { return SyncError.noServerURL }
         guard SyncService.isAuthenticated else { return SyncError.notAuthenticated }
+        // Claim the throttle window before suspending. Setting it afterwards
+        // let every caller that started during the round trip pass the guard,
+        // so a cold launch fired `GET /plans` two or three times over.
+        let previousSyncDate = lastSyncDate
+        lastSyncDate = .now
         do {
             let summaries = try await SyncService.fetchPlans()
+            var firstImportError: Error?
             for summary in summaries {
-                importIfNewer(summary, context: context)
+                if let error = importIfNewer(summary, context: context),
+                   firstImportError == nil {
+                    firstImportError = error
+                }
             }
-            lastSyncDate = .now
-            return nil
+            return firstImportError
         } catch {
+            // The round trip failed, so nothing was refreshed -- let the next
+            // caller retry instead of holding the window for 10 minutes.
+            lastSyncDate = previousSyncDate
             return error
         }
     }
@@ -52,15 +63,15 @@ enum PlanSyncHelper {
     private static func importIfNewer(
         _ summary: SyncService.PlanSummary,
         context: ModelContext
-    ) {
+    ) -> Error? {
         switch summary.planType {
         case PlanType.strength.rawValue:
-            importIfNewerStrength(summary, context: context)
+            return importIfNewerStrength(summary, context: context)
         case PlanType.cycling.rawValue:
-            importIfNewerCycling(summary, context: context)
+            return importIfNewerCycling(summary, context: context)
         default:
-            // unknown plan type -- skip
-            break
+            // unknown plan type -- a newer build will handle it
+            return nil
         }
     }
 
@@ -68,26 +79,34 @@ enum PlanSyncHelper {
     private static func importIfNewerStrength(
         _ summary: SyncService.PlanSummary,
         context: ModelContext
-    ) {
+    ) -> Error? {
         let planId = summary.planId
         let descriptor = FetchDescriptor<SDPlan>(
             predicate: #Predicate { $0.planId == planId }
         )
-        let existing = try? context.fetch(descriptor).first
-        if let existing, existing.planVersion >= summary.planVersion {
-            return
+        // A failed fetch must not read as "no local plan" -- that would let a
+        // `replaceExisting` import overwrite a newer local copy.
+        guard let matches = try? context.fetch(descriptor) else {
+            return SyncError.planFetchFailed(planId)
+        }
+        if let existing = matches.max(by: { $0.planVersion < $1.planVersion }),
+           existing.planVersion >= summary.planVersion {
+            return nil
         }
         do {
             guard case .strength(let json) = try PlanImportService.parse(summary.rawJSON) else {
-                return
+                return PlanImportError.unknownPlanType(summary.planType)
             }
             _ = try PlanImportService.importStrength(
                 json,
                 into: context,
                 replaceExisting: true
             )
+            return nil
         } catch {
-            // skip on failure
+            // Surfaced by the caller: silently dropping this made a plan the
+            // app cannot decode simply never appear, with no diagnostic.
+            return error
         }
     }
 
@@ -95,26 +114,34 @@ enum PlanSyncHelper {
     private static func importIfNewerCycling(
         _ summary: SyncService.PlanSummary,
         context: ModelContext
-    ) {
+    ) -> Error? {
         let planId = summary.planId
         let descriptor = FetchDescriptor<SDCyclingPlan>(
             predicate: #Predicate { $0.planId == planId }
         )
-        let existing = try? context.fetch(descriptor).first
-        if let existing, existing.planVersion >= summary.planVersion {
-            return
+        // A failed fetch must not read as "no local plan" -- that would let a
+        // `replaceExisting` import overwrite a newer local copy.
+        guard let matches = try? context.fetch(descriptor) else {
+            return SyncError.planFetchFailed(planId)
+        }
+        if let existing = matches.max(by: { $0.planVersion < $1.planVersion }),
+           existing.planVersion >= summary.planVersion {
+            return nil
         }
         do {
             guard case .cycling(let json) = try PlanImportService.parse(summary.rawJSON) else {
-                return
+                return PlanImportError.unknownPlanType(summary.planType)
             }
             _ = try PlanImportService.importCycling(
                 json,
                 into: context,
                 replaceExisting: true
             )
+            return nil
         } catch {
-            // skip on failure
+            // Surfaced by the caller: silently dropping this made a plan the
+            // app cannot decode simply never appear, with no diagnostic.
+            return error
         }
     }
 }

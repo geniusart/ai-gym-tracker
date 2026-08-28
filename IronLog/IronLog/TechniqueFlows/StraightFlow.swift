@@ -11,6 +11,12 @@ struct StraightFlow: TechniqueFlow {
         completedSetIndex: Int?,
         completedReps: Int?
     ) -> TechniqueStep? {
+        // `TechniqueFlowFactory` falls back to a flow even when it could not
+        // validate the index, so every flow bounds-checks before subscripting.
+        guard exercises.indices.contains(exerciseIndex) else {
+            assertionFailure("Invalid exerciseIndex \(exerciseIndex) for exercises count \(exercises.count)")
+            return nil
+        }
         let ex = exercises[exerciseIndex]
 
         // Find first incomplete set

@@ -69,23 +69,20 @@ final class PhoneWorkoutHRSource: NSObject, HRSource {
     }
 
     func stop() {
-        guard let session, let builder else {
-            self.session = nil
-            self.builder = nil
-            return
-        }
+        guard let session, let builder else { return }
+
+        // Clear the handles before the async teardown: `saveWorkout` stops the
+        // source and the `.saved` transition stops it again a frame later, so
+        // waiting for `finishWorkout` would re-end the same builder.
+        self.session = nil
+        self.builder = nil
 
         session.end()
-        builder.endCollection(withEnd: .now) { [weak self] _, _ in
+        builder.endCollection(withEnd: .now) { _, _ in
             // Save the workout to Apple Health so the user gets Activity-ring
             // credit and the HR samples persist alongside other workouts.
             // If the user ever doesn't want this, we can switch to discard.
-            builder.finishWorkout { _, _ in
-                Task { @MainActor in
-                    self?.session = nil
-                    self?.builder = nil
-                }
-            }
+            builder.finishWorkout { _, _ in }
         }
     }
 }

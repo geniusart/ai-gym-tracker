@@ -193,7 +193,10 @@ struct WorkoutHistoryView: View {
 
     private func deleteStrength(_ workout: SDWorkout) {
         let workoutId = workout.workoutId
-        let wasSynced = workout.syncedAt != nil
+        // An upload already in flight will upsert this workout server-side
+        // after the local row is gone, so the DELETE has to be issued for a
+        // syncing workout too -- not only for one that finished syncing.
+        let existsRemotely = workout.syncedAt != nil || syncingIds.contains(workoutId)
         modelContext.delete(workout)
         do {
             try modelContext.save()
@@ -201,7 +204,7 @@ struct WorkoutHistoryView: View {
             errorMessage = "Could not delete workout: \(error.localizedDescription)"
             return
         }
-        if wasSynced, SyncService.isConfigured, SyncService.isAuthenticated {
+        if existsRemotely, SyncService.isConfigured, SyncService.isAuthenticated {
             Task.detached {
                 try? await SyncService.deleteWorkout(workoutId)
             }
@@ -210,7 +213,10 @@ struct WorkoutHistoryView: View {
 
     private func deleteCycling(_ workout: SDCyclingWorkout) {
         let workoutId = workout.workoutId
-        let wasSynced = workout.syncedAt != nil
+        // An upload already in flight will upsert this workout server-side
+        // after the local row is gone, so the DELETE has to be issued for a
+        // syncing workout too -- not only for one that finished syncing.
+        let existsRemotely = workout.syncedAt != nil || syncingIds.contains(workoutId)
         modelContext.delete(workout)
         do {
             try modelContext.save()
@@ -218,7 +224,7 @@ struct WorkoutHistoryView: View {
             errorMessage = "Could not delete cycling workout: \(error.localizedDescription)"
             return
         }
-        if wasSynced, SyncService.isConfigured, SyncService.isAuthenticated {
+        if existsRemotely, SyncService.isConfigured, SyncService.isAuthenticated {
             Task.detached {
                 try? await SyncService.deleteWorkout(workoutId)
             }
@@ -918,14 +924,7 @@ private struct MiniMetricPill: View {
 }
 
 private func setTypeBadge(_ type: String) -> (label: String, color: Color)? {
-    switch type {
-    case "warmup": return ("Warmup", CockpitPalette.blue)
-    case "drop": return ("Drop", CockpitPalette.amber)
-    case "myo_mini": return ("Myo", CockpitPalette.magenta)
-    case "rest_pause": return ("Rest", CockpitPalette.cyan)
-    case "working": return nil
-    default: return (type.capitalized, CockpitPalette.muted)
-    }
+    SetTypeStyle.badge(type)
 }
 
 private func strengthEffortInfo(_ effort: Int) -> (label: String, color: Color) {
@@ -985,15 +984,6 @@ private func formatDuration(_ seconds: Int) -> String {
 
 // MARK: - Weight formatting
 
-/// Formats a weight in kg, omitting the decimal when it is an integer.
-/// 100.0 -> "100"; 102.5 -> "102.5"; 22.5 -> "22.5".
 private func formatWeight(_ kg: Double) -> String {
-    if kg.rounded() == kg {
-        return String(Int(kg))
-    }
-    let formatter = NumberFormatter()
-    formatter.minimumFractionDigits = 0
-    formatter.maximumFractionDigits = 2
-    formatter.decimalSeparator = "."
-    return formatter.string(from: NSNumber(value: kg)) ?? "\(kg)"
+    WorkoutFormatting.weight(kg)
 }

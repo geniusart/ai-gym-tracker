@@ -163,10 +163,10 @@ final class ActiveWorkoutViewModel {
         autoStartSetAfterRest && !pendingAdvanceToNextExercise
     }
 
-    /// Name of the next exercise (if any)
+    /// Name of the next exercise (if any), following the same walk the
+    /// executor uses so a superset pair is not announced twice.
     var nextExerciseName: String? {
-        let nextIdx = currentExerciseIndex + 1
-        guard exercises.indices.contains(nextIdx) else { return nil }
+        guard let nextIdx = nextExerciseIndexAfterCurrentFlow() else { return nil }
         return exercises[nextIdx].name
     }
 
@@ -518,12 +518,15 @@ final class ActiveWorkoutViewModel {
     }
 
     func skipRest() {
-        restTimer.stop()
+        // The Live Activity stays up: `onRestComplete` either pushes the
+        // performing phase or ends it, so tearing it down here would only
+        // cause an extra teardown/request round trip.
+        restTimer.stopTicking()
         onRestComplete()
     }
 
     func onRestFinished() {
-        restTimer.stop()
+        restTimer.stopTicking()
         onRestComplete()
     }
 
@@ -532,14 +535,25 @@ final class ActiveWorkoutViewModel {
             pendingAdvanceToNextExercise = false
             autoStartSetAfterRest = false
             applyPendingRatingAndAdvance()
+            endRestActivityIfIdle()
         } else if autoStartSetAfterRest {
             autoStartSetAfterRest = false
+            // Pushes the performing phase onto the same Live Activity.
             beginPerforming()
         } else {
             // Flow already set currentExerciseIndex/currentSetIndex
             setPhase = .ready
             state = .active
+            endRestActivityIfIdle()
         }
+    }
+
+    /// The rest countdown no longer reflects anything, and nothing is about to
+    /// push a new phase, so retire the Live Activity rather than leaving a
+    /// stale banner on the Lock Screen.
+    private func endRestActivityIfIdle() {
+        guard setPhase != .performing else { return }
+        RestTimerActivityManager.shared.endIfNeeded()
     }
 
     func finishExercise() {
@@ -563,21 +577,31 @@ final class ActiveWorkoutViewModel {
         }
     }
 
-    private func applyPendingRatingAndAdvance() {
-        let ratingIndex = pendingRatingExerciseIndex ?? currentExerciseIndex
-        if let rating = pendingRating,
-           let workout,
-           exercises.indices.contains(ratingIndex) {
-            let exId = exercises[ratingIndex].exerciseId
-            if let exLog = workout.exercises.first(where: { $0.exerciseId == exId }) {
-                exLog.exerciseRating = rating
-                if let context = modelContext {
-                    _ = saveContext(context, action: "save exercise rating")
-                }
-            }
+    /// Write a rating the user tapped during the between-exercise rest onto
+    /// the exercise it was tapped for. Every path that leaves that rest --
+    /// advancing, jumping elsewhere, finishing -- has to call this, or the
+    /// rating is either dropped or applied to the wrong exercise.
+    private func applyPendingRating() {
+        defer {
+            pendingRating = nil
+            pendingRatingExerciseIndex = nil
         }
-        pendingRating = nil
-        pendingRatingExerciseIndex = nil
+        let ratingIndex = pendingRatingExerciseIndex ?? currentExerciseIndex
+        guard let rating = pendingRating,
+              let workout,
+              exercises.indices.contains(ratingIndex)
+        else { return }
+        let exId = exercises[ratingIndex].exerciseId
+        guard let exLog = workout.exercises.first(where: { $0.exerciseId == exId })
+        else { return }
+        exLog.exerciseRating = rating
+        if let context = modelContext {
+            _ = saveContext(context, action: "save exercise rating")
+        }
+    }
+
+    private func applyPendingRatingAndAdvance() {
+        applyPendingRating()
         advanceToNextExercise()
     }
 
@@ -587,24 +611,9 @@ final class ActiveWorkoutViewModel {
             return
         }
 
-        // Find next exercise not covered by the current flow
-        let coveredIndices = Set(currentFlow?.exerciseIndices ?? [])
-        var nextIdx = (coveredIndices.max() ?? currentExerciseIndex) + 1
-
-        // Skip superset partners that were already processed
-        while nextIdx < exercises.count {
-            let ex = exercises[nextIdx]
-            if ex.technique == "superset",
-               let partnerIdx = ex.supersetPartnerIndex,
-               partnerIdx < nextIdx {
-                // This is the "junior" partner -- skip, it was handled by the flow
-                nextIdx += 1
-            } else {
-                break
-            }
-        }
-
-        if nextIdx < exercises.count {
+        // Find next exercise not covered by the current flow, skipping the
+        // junior superset partners the flow already ran.
+        if let nextIdx = nextExerciseIndexAfterCurrentFlow() {
             currentExerciseIndex = nextIdx
             currentSetIndex = 0
             activateFlowForCurrentExercise()
@@ -641,6 +650,9 @@ final class ActiveWorkoutViewModel {
         setStopwatch.stop()
         pendingAdvanceToNextExercise = false
         autoStartSetAfterRest = false
+        // The rating bar belongs to the exercise the user just finished;
+        // jumping away must not carry it over to a different one.
+        applyPendingRating()
         currentExerciseIndex = index
         let sets = exercises[index].sets
         currentSetIndex = sets.firstIndex(where: { !$0.isCompleted }) ?? 0
@@ -828,7 +840,7 @@ final class ActiveWorkoutViewModel {
             * TimeEstimate.dropOrMyoMiniUnits
     }
 
-    private func nextExerciseIndexAfterCurrentFlow() -> Int? {
+    func nextExerciseIndexAfterCurrentFlow() -> Int? {
         let coveredIndices = Set(currentFlow?.exerciseIndices ?? [])
         var nextIdx = (coveredIndices.max() ?? currentExerciseIndex) + 1
 
@@ -1040,8 +1052,12 @@ final class ActiveWorkoutViewModel {
               let context = modelContext
         else { return }
 
-        let target = lastCompletedSetLog ?? latestCompletedSetLog(in: workout)
-        target?.restSecondsAfter = seconds
+        var target = lastCompletedSetLog
+        if target?.exerciseLog?.workout !== workout {
+            target = latestCompletedSetLog(in: workout)
+        }
+        guard let target, !target.isDeleted else { return }
+        target.restSecondsAfter = seconds
         _ = saveContext(context, action: "save rest duration")
     }
 
@@ -1100,6 +1116,8 @@ final class ActiveWorkoutViewModel {
 
     func saveWorkout() {
         guard let workout, let context = modelContext else { return }
+
+        applyPendingRating()
 
         let endDate = Date.now
         workout.finishedAt = endDate
@@ -1184,6 +1202,12 @@ final class ActiveWorkoutViewModel {
         autoStartSetAfterRest = false
         pendingRating = nil
         pendingRatingExerciseIndex = nil
+        // These cache the previously completed set so the next one can record
+        // how long the rest actually lasted. They point into the workout being
+        // torn down, so keeping them would make the first set of the next
+        // workout write a rest duration onto this one's last set.
+        lastSetCompletedAt = nil
+        lastCompletedSetLog = nil
         restTimer.stop()
         setStopwatch.stop()
         WorkoutSessionManager.shared.stopMirroring()

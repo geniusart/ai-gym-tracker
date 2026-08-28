@@ -13,6 +13,7 @@
 		12514F64FB335F325015D30C /* IronLogWidgetsBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B3F532FF66BEC4FC23D3086 /* IronLogWidgetsBundle.swift */; };
 		1363FA115D352C1F960BE2A6 /* TemplatePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60001772EF66088099E53247 /* TemplatePicker.swift */; };
 		1775F7C86A8F336D7974EFC5 /* PhoneWorkoutHRSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB654CC25AFCD719E51B1636 /* PhoneWorkoutHRSource.swift */; };
+		1A5535CF4A4DDCAB3CC4BF6A /* WorkoutFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F7BE169606EE82E5443C8F0 /* WorkoutFormatting.swift */; };
 		22C7AE60E4D1A830C470C5A8 /* SDPrescribedSet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91F1BA55C15D47CFEF1663B3 /* SDPrescribedSet.swift */; };
 		27A60272B28ECE763BCB2D41 /* TechniqueFlowFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 744DAE6CAFA21C0C011011FB /* TechniqueFlowFactory.swift */; };
 		28694F293F40D39BC15C4116 /* PlanImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3719F8C6CF3CCEDBD02AAA26 /* PlanImportService.swift */; };
@@ -45,6 +46,7 @@
 		839096F5A06C02240AA2B369 /* LiveWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AAFD2469A44B231ADC47A42 /* LiveWorkoutView.swift */; };
 		84890F720260087A8B285504 /* SDWorkout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46FFF94744538A5FBC26E553 /* SDWorkout.swift */; };
 		8B22B015C0D78B7CD1036CB0 /* sample-plan.json in Resources */ = {isa = PBXBuildFile; fileRef = EE47161A61ADA95A2ECA149E /* sample-plan.json */; };
+		8D0229C6609B37A4266810FE /* WorkoutFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F7BE169606EE82E5443C8F0 /* WorkoutFormatting.swift */; };
 		8D953D8EF45E0AB2B0100D06 /* PlanSyncHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76C67DF310FF91A0AD87D2C8 /* PlanSyncHelper.swift */; };
 		9304B997188A8195EB64AE40 /* RestTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16399A713C26691F71D422DB /* RestTimerLiveActivity.swift */; };
 		981328CC51381DFD44F92B14 /* CyclingWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1001E6B9D92EB774339D1A7C /* CyclingWorkoutView.swift */; };
@@ -184,6 +186,7 @@
 		9C8C919D8CBA86E285BAD7D3 /* RestTimerActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestTimerActivity.swift; sourceTree = "<group>"; };
 		9D344C1479989C7B133CAE76 /* SDCyclingPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDCyclingPlan.swift; sourceTree = "<group>"; };
 		9D7F68C6C41A3428321DDA54 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		9F7BE169606EE82E5443C8F0 /* WorkoutFormatting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutFormatting.swift; sourceTree = "<group>"; };
 		A6FE7055A7F46A37D977A796 /* WorkoutPlanJSON.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutPlanJSON.swift; sourceTree = "<group>"; };
 		AD6F32CFD231D79A3F75DB70 /* SDExerciseLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SDExerciseLog.swift; sourceTree = "<group>"; };
 		AE503FA15D4D6EB057533FD0 /* IronLogWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IronLogWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -307,6 +310,14 @@
 				46FFF94744538A5FBC26E553 /* SDWorkout.swift */,
 			);
 			path = Data;
+			sourceTree = "<group>";
+		};
+		6C27E3522405CF2C0C1090B7 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				9F7BE169606EE82E5443C8F0 /* WorkoutFormatting.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 		6DAF1FD744C12AF759FA6153 = {
@@ -440,6 +451,7 @@
 				915A40F25C13986B6CCF91AD /* Models */,
 				3F47C8A5B2BD310177171771 /* Resources */,
 				86C6B699A050091305C25FF7 /* Services */,
+				6C27E3522405CF2C0C1090B7 /* Shared */,
 				18E20879A8A79AD51E8CF372 /* TechniqueFlows */,
 				DB4B3DC3D997A42D291535C7 /* ViewModels */,
 				AB75DA28F96AD1ED73A9EE2D /* Views */,
@@ -568,6 +580,7 @@
 				TargetAttributes = {
 					2B52870E96751A366903E3A9 = {
 						DevelopmentTeam = W88C7J82R5;
+						ProvisioningStyle = Automatic;
 					};
 					3FF2A23F26CD7F06645A932F = {
 						DevelopmentTeam = W88C7J82R5;
@@ -575,9 +588,11 @@
 					};
 					5770372D1CCD9F541968845C = {
 						DevelopmentTeam = W88C7J82R5;
+						ProvisioningStyle = Automatic;
 					};
 					68F127FF37A8B7D8E5F786A1 = {
 						DevelopmentTeam = W88C7J82R5;
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -637,6 +652,7 @@
 				12514F64FB335F325015D30C /* IronLogWidgetsBundle.swift in Sources */,
 				56B0A76826F3AF7234BAB66F /* RestTimerActivity.swift in Sources */,
 				9304B997188A8195EB64AE40 /* RestTimerLiveActivity.swift in Sources */,
+				8D0229C6609B37A4266810FE /* WorkoutFormatting.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -697,6 +713,7 @@
 				1363FA115D352C1F960BE2A6 /* TemplatePicker.swift in Sources */,
 				37CCCE4AD0FE3A98F984ED66 /* WatchHRSource.swift in Sources */,
 				C89F3A35766F74BED16AA3F5 /* WorkoutExportService.swift in Sources */,
+				1A5535CF4A4DDCAB3CC4BF6A /* WorkoutFormatting.swift in Sources */,
 				2993D68A39B4B0DACDC9C870 /* WorkoutHistoryView.swift in Sources */,
 				E0541E61C5DFE4EAA917D5D3 /* WorkoutLogJSON.swift in Sources */,
 				CDFAD074E0B08300C779D833 /* WorkoutPlanJSON.swift in Sources */,
@@ -859,11 +876,15 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = W88C7J82R5;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -876,6 +897,8 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.9;
@@ -950,11 +973,15 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = W88C7J82R5;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -974,6 +1001,8 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.9;

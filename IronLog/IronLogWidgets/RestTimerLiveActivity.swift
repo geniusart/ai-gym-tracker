@@ -131,7 +131,7 @@ struct RestTimerLiveActivity: Widget {
         } else {
             // Resting: normal countdown
             Text(
-                timerInterval: Date.now...context.state.timerDate,
+                timerInterval: Date.now...max(Date.now, context.state.timerDate),
                 countsDown: true
             )
         }
@@ -153,13 +153,6 @@ struct RestTimerLiveActivity: Widget {
     }
 }
 
-/// Formats a weight in kg, dropping the decimal when it is an integer.
-/// 100.0 -> "100", 102.5 -> "102.5". Defined here (private to the widget
-/// module) because the analogous helper in the main app is not visible
-/// to the IronLogWidgets target.
 private func formatWeight(_ kg: Double) -> String {
-    if kg.rounded() == kg {
-        return String(Int(kg))
-    }
-    return String(format: "%g", kg)
+    WorkoutFormatting.weight(kg)
 }

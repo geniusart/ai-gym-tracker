@@ -30,7 +30,11 @@ final class RestTimerService {
             isOvertime = false
             return
         }
-        stop()
+        // Only halt the ticker: `stop()` would end the Live Activity that the
+        // `startResting` call below is about to replace, so every set would
+        // tear the banner down and request a fresh one -- a visible flicker,
+        // and eventually an ActivityKit start-budget failure mid-workout.
+        stopTicking()
         totalSeconds = seconds
         secondsRemaining = seconds
         overtimeSeconds = 0
@@ -71,12 +75,18 @@ final class RestTimerService {
         }
     }
 
-    func stop() {
+    /// Stop the countdown without touching the Live Activity. Used when the
+    /// caller immediately pushes a new phase to the same activity.
+    func stopTicking() {
         timerCancellable?.cancel()
         timerCancellable = nil
         isRunning = false
         startDate = nil
         Self.cancelPendingNotification()
+    }
+
+    func stop() {
+        stopTicking()
         RestTimerActivityManager.shared.endIfNeeded()
     }
 

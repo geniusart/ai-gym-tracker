@@ -5,10 +5,16 @@ import SwiftUI
 // MARK: - Schedule entry
 
 /// One segment in the workout's pre-computed timeline. The Live Activity
-/// payload carries the full list, so the widget can pick the "current"
-/// segment by comparing `endsAt` to `Date.now` -- no app code required at
-/// transition moments. SwiftUI re-renders when its `Text(timerInterval:)`
-/// crosses an `endsAt`, naturally advancing to the next segment.
+/// payload carries the full list so the widget can pick the "current" segment
+/// by comparing `endsAt` to `Date.now`.
+///
+/// Note: carrying the full schedule is NOT enough on its own. `Text(timerInterval:)`
+/// is a self-updating leaf that the system ticks from an already-rendered view --
+/// it does not re-run the `ActivityConfiguration` content closure, so the segment
+/// name, icon and "Step X of N" stay frozen at whatever `Date.now` was when the
+/// content was last pushed. The host therefore pushes an update at each segment
+/// transition, and sets `staleDate` to the current segment's end so the system
+/// re-renders at the boundary even when the app is not running.
 public struct ScheduledSegment: Codable, Hashable, Identifiable {
     public let stepIndex: Int       // 0-based position in the workout
     public let stepName: String     // display name (Russian, from plan)
@@ -22,12 +28,11 @@ public struct ScheduledSegment: Codable, Hashable, Identifiable {
 
 /// Live Activity payload for a cycling workout.
 ///
-/// Key design choice: we ship the **entire workout schedule** (every
-/// segment's absolute end-time) in the content state, not just the
-/// current segment. The widget self-advances by comparing `endsAt`
-/// values to `Date.now`. This lets the Dynamic Island / Lock Screen
-/// stay correct even when the host app has been suspended for a long
-/// time (e.g. user is in YouTube for 30 minutes).
+/// We ship the **entire workout schedule** (every segment's absolute end-time)
+/// in the content state, not just the current segment, so that any re-render --
+/// a screen wake, a Dynamic Island expand, a `staleDate` refresh, or a push from
+/// the host -- lands on the right segment without needing fresh data. It is the
+/// re-render that has to be arranged; see `ScheduledSegment`.
 struct CyclingActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         /// Full timeline. The widget picks `current` as
@@ -69,8 +74,9 @@ final class CyclingActivityManager {
             schedule: schedule,
             paused: false
         )
+        let stale = Self.staleDate(for: schedule)
         if let activity = currentActivity {
-            Task { await activity.update(.init(state: state, staleDate: nil)) }
+            Task { await activity.update(.init(state: state, staleDate: stale)) }
         } else {
             guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
             let attributes = CyclingActivityAttributes(
@@ -80,7 +86,7 @@ final class CyclingActivityManager {
             do {
                 currentActivity = try Activity.request(
                     attributes: attributes,
-                    content: .init(state: state, staleDate: nil),
+                    content: .init(state: state, staleDate: stale),
                     pushType: nil
                 )
             } catch {
@@ -90,14 +96,16 @@ final class CyclingActivityManager {
         }
     }
 
-    /// Push a freshly computed schedule (used after pause/resume/skip).
-    func updateSchedule(_ schedule: [ScheduledSegment]) {
+    /// Push a freshly computed schedule. Called on pause/resume/skip and at
+    /// every segment transition -- the banner cannot advance on its own.
+    func updateSchedule(_ schedule: [ScheduledSegment], paused: Bool = false) {
         guard let activity = currentActivity else { return }
         let state = CyclingActivityAttributes.ContentState(
             schedule: schedule,
-            paused: false
+            paused: paused
         )
-        Task { await activity.update(.init(state: state, staleDate: nil)) }
+        let stale = paused ? nil : Self.staleDate(for: schedule)
+        Task { await activity.update(.init(state: state, staleDate: stale)) }
     }
 
     /// Flip the paused flag. The schedule is left as-is until resume,
@@ -110,7 +118,17 @@ final class CyclingActivityManager {
             schedule: prev.schedule,
             paused: paused
         )
-        Task { await activity.update(.init(state: state, staleDate: nil)) }
+        let stale = paused ? nil : Self.staleDate(for: prev.schedule)
+        Task { await activity.update(.init(state: state, staleDate: stale)) }
+    }
+
+    /// The moment the pushed content stops being accurate: the end of the
+    /// segment that is current right now. ActivityKit re-renders the activity
+    /// then, which is the only chance a suspended app has to move the banner
+    /// on to the next segment.
+    private static func staleDate(for schedule: [ScheduledSegment]) -> Date? {
+        let now = Date.now
+        return schedule.first(where: { $0.endsAt > now })?.endsAt
     }
 
     func end() {

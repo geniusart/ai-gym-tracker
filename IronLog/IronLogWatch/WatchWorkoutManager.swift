@@ -44,17 +44,23 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     }
 
     func startWorkout(activity: String = "strength") async {
-        guard session == nil else { return }
+        let wantsCardio = (activity == "cycling")
+
+        // A session can survive a dropped stop command. Adopt the requested
+        // mode anyway, otherwise a cycling workout started over a stale
+        // strength session would stream no HR while still acking "started".
+        guard session == nil else {
+            isCardioMode = wantsCardio
+            return
+        }
 
         let config = HKWorkoutConfiguration()
-        switch activity {
-        case "cycling":
+        if wantsCardio {
             config.activityType = .cycling
-            isCardioMode = true
-        default:
+        } else {
             config.activityType = .traditionalStrengthTraining
-            isCardioMode = false
         }
+        isCardioMode = wantsCardio
         config.locationType = .indoor
 
         do {
@@ -114,6 +120,10 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     private func saveAndReset() async {
         stopTimer()
         guard let builder else { return }
+        // HealthKit reports `running -> stopped -> ended`, so the state handler
+        // fires twice; clear the handle up front so the second pass bails
+        // instead of ending the same builder again.
+        self.builder = nil
         do {
             try await builder.endCollection(at: .now)
             try await builder.finishWorkout()
@@ -121,7 +131,6 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             // save failed
         }
         session = nil
-        self.builder = nil
         heartRate = 0
         activeCalories = 0
         elapsedSeconds = 0
@@ -169,6 +178,19 @@ extension WatchWorkoutManager: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {}
+
+    /// Queued fallback for `stopWorkout` when the phone sent it while the
+    /// pair was out of range. Without this the session would keep running.
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveUserInfo userInfo: [String: Any] = [:]
+    ) {
+        guard userInfo["command"] as? String == "stopWorkout" else { return }
+        Task { @MainActor in
+            endWorkout()
+            sendStatusToiPhone("stopped")
+        }
+    }
 
     nonisolated func session(
         _ session: WCSession,

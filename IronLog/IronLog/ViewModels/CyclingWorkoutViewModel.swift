@@ -215,6 +215,19 @@ final class CyclingWorkoutViewModel {
         max(0, (currentStep?.durationSeconds ?? 0) - elapsedInStepSeconds)
     }
 
+    /// Seconds after which a latched HR reading stops counting as live.
+    /// Apple Health buffers and flushes in batches, so the window has to be
+    /// wider than the watch's ~1 Hz push.
+    private static let hrFreshnessWindow: TimeInterval = 15
+
+    /// True if the last HR sample is recent enough to be treated as live.
+    /// Every `HRSource` keeps its last value forever, so metrics have to
+    /// check the timestamp rather than just the presence of a reading.
+    var isHrFresh: Bool {
+        guard let at = liveBpmSampleAt else { return false }
+        return Date.now.timeIntervalSince(at) < Self.hrFreshnessWindow
+    }
+
     /// True if the current HR sample is within the current step's target range.
     var isInZone: Bool? {
         guard let step = currentStep, step.hasHrTarget,
@@ -308,6 +321,20 @@ final class CyclingWorkoutViewModel {
         sdWorkout: SDCyclingWorkout,
         context: ModelContext
     ) {
+        // Re-entry guard: the picker calls this from `onAppear`, which also
+        // fires when the user backs out of the finish screen. If this VM is
+        // already running the same workout, everything below would wipe the
+        // accumulated metrics (HR samples, pause and skip credit) that only
+        // live in memory. Restore the executor instead of restarting it.
+        if let current = workout,
+           current.workoutId == sdWorkout.workoutId,
+           state != .idle, state != .saved {
+            if case .finishing = state {
+                cancelFinishing()
+            }
+            return
+        }
+
         modelContext = context
         sourcePlan = plan
         sourceTemplate = template
@@ -393,7 +420,7 @@ final class CyclingWorkoutViewModel {
 
         // Detect step transition (possibly skipping multiple in one tick
         // if the app was backgrounded long enough to miss boundaries).
-        if newIdx != currentStepIndex {
+        if newIdx > currentStepIndex {
             for i in currentStepIndex..<newIdx {
                 var m = stepMetrics[i] ?? StepMetrics()
                 if !m.skipped {
@@ -402,6 +429,11 @@ final class CyclingWorkoutViewModel {
                 stepMetrics[i] = m
             }
             currentStepIndex = newIdx
+            // The Live Activity does not re-evaluate its own body when a
+            // segment ends, so the banner would keep showing the previous
+            // segment's name and icon. Push the schedule again, which also
+            // re-arms `staleDate` for the next boundary.
+            pushScheduleToWidget()
             // One haptic for the latest crossed boundary -- don't burst
             // multiple if app caught up after a long background.
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -412,7 +444,10 @@ final class CyclingWorkoutViewModel {
         // Live HR sampling (foreground-only -- background ticks don't run).
         var metrics = stepMetrics[currentStepIndex] ?? StepMetrics()
         metrics.actualDuration = elapsedInStepSeconds
-        if let bpm = liveBpm {
+        // Only count a reading the source actually refreshed recently. Every
+        // HRSource latches its last value, so without this a watch taken off
+        // mid-ride would keep scoring in-zone seconds until the end.
+        if let bpm = liveBpm, isHrFresh {
             metrics.hrSamples.append(bpm)
             if let inZone = isInZone, inZone {
                 metrics.inZoneSeconds += 1
@@ -451,6 +486,10 @@ final class CyclingWorkoutViewModel {
     /// remaining duration to `skipCreditSeconds` so the timeline jumps
     /// forward.
     func skipStep() {
+        // `tick()` ignores everything while paused, so skipping there would
+        // bank credit without moving the timeline and would silently re-arm
+        // the notifications and Live Activity that `togglePause` cancelled.
+        guard state == .running else { return }
         guard currentStepIndex < steps.count else { return }
         var metrics = stepMetrics[currentStepIndex] ?? StepMetrics()
         metrics.skipped = true
@@ -487,16 +526,19 @@ final class CyclingWorkoutViewModel {
         // that path is active. We don't poke `WorkoutSessionManager` here.
     }
 
+    /// False once the timeline is exhausted: there is nothing left to resume,
+    /// so the finish form must not offer the button at all.
+    var canCancelFinishing: Bool {
+        currentStepIndex < steps.count
+    }
+
     func cancelFinishing() {
-        if currentStepIndex < steps.count {
-            state = stateBeforeFinishing ?? .running
-            if state == .running {
-                tick()
-            }
-            if currentStepIndex < steps.count {
-                restoreCyclingActivityAfterFinishing()
-            }
+        guard canCancelFinishing else { return }
+        state = stateBeforeFinishing ?? .running
+        if state == .running {
+            tick()
         }
+        restoreCyclingActivityAfterFinishing()
         stateBeforeFinishing = nil
     }
 
@@ -615,7 +657,10 @@ final class CyclingWorkoutViewModel {
             pausedTotal: pausedDurationTotal,
             skipCredit: skipCreditSeconds
         )
-        CyclingActivityManager.shared.updateSchedule(schedule)
+        CyclingActivityManager.shared.updateSchedule(
+            schedule,
+            paused: state == .paused
+        )
     }
 
     private func restoreCyclingActivityAfterFinishing() {

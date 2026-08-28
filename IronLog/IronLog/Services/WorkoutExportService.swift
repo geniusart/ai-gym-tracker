@@ -120,7 +120,11 @@ enum WorkoutExportService {
             id: w.workoutId,
             templateId: w.templateId,
             templateName: w.templateName,
-            planType: w.planType.flatMap(PlanType.init(rawValue:)),
+            // Never omit it: the server's analytics all filter on
+            // `plan_type == "strength"`, so a log without it is silently
+            // excluded from volume, progression and workout counts. Rows
+            // predating the field migrate in as nil.
+            planType: w.planType.flatMap(PlanType.init(rawValue:)) ?? .strength,
             planId: w.planId,
             planName: w.planName,
             planVersion: w.planVersion,

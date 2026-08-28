@@ -301,11 +301,13 @@ struct CyclingWorkoutView: View {
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
-                Button(role: .cancel) {
-                    vm.cancelFinishing()
-                } label: {
-                    Text("Resume")
-                        .frame(maxWidth: .infinity)
+                if vm.canCancelFinishing {
+                    Button(role: .cancel) {
+                        vm.cancelFinishing()
+                    } label: {
+                        Text("Resume")
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
         }

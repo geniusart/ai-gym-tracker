@@ -101,7 +101,7 @@ final class PlanImportService {
 
         // 2. Dispatch
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom(decodeISO8601)
 
         switch envelope.planType {
         case PlanType.strength.rawValue:
@@ -177,11 +177,15 @@ final class PlanImportService {
         }
         let existing = try context.fetch(descriptor)
 
-        if let old = existing.first {
-            if replaceExisting {
-                context.delete(old)
-            } else {
+        if !existing.isEmpty {
+            guard replaceExisting else {
                 throw PlanImportError.duplicatePlan(json.planName)
+            }
+            // The predicate also matches the legacy `planId == ""` row, so
+            // there can be more than one; leaving any behind would break the
+            // "one plan per (plan_type, plan_id)" invariant.
+            for old in existing {
+                context.delete(old)
             }
         }
 
@@ -276,11 +280,12 @@ final class PlanImportService {
         }
         let existing = try context.fetch(descriptor)
 
-        if let old = existing.first {
-            if replaceExisting {
-                context.delete(old)
-            } else {
+        if !existing.isEmpty {
+            guard replaceExisting else {
                 throw PlanImportError.duplicatePlan(json.planName)
+            }
+            for old in existing {
+                context.delete(old)
             }
         }
 
@@ -374,4 +379,34 @@ private extension [CodingKey] {
     var pathString: String {
         map(\.stringValue).joined(separator: ".")
     }
+}
+
+// MARK: - Date decoding
+
+/// `JSONDecoder.iso8601` only understands `[.withInternetDateTime]`, so a
+/// timestamp carrying fractional seconds -- what Python's `datetime.isoformat()`
+/// produces, and what `CrashReporter` itself emits -- would reject the whole
+/// plan over its `created_at` field.
+private let iso8601WithFractionalSeconds: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+private let iso8601Plain: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+}()
+
+private func decodeISO8601(_ decoder: Decoder) throws -> Date {
+    let raw = try decoder.singleValueContainer().decode(String.self)
+    if let date = iso8601Plain.date(from: raw) { return date }
+    if let date = iso8601WithFractionalSeconds.date(from: raw) { return date }
+    throw DecodingError.dataCorrupted(
+        .init(
+            codingPath: decoder.codingPath,
+            debugDescription: "Expected an ISO 8601 date, got \"\(raw)\""
+        )
+    )
 }

@@ -51,16 +51,32 @@ final class WorkoutSessionManager: NSObject, ObservableObject {
     }
 
     func stopMirroring() {
-        guard let session = wcSession, session.isReachable else {
-            isMirroring = false
-            return
-        }
-        session.sendMessage(
-            ["command": "stopWorkout"],
-            replyHandler: nil,
-            errorHandler: nil
-        )
         isMirroring = false
+        guard let session = wcSession else { return }
+
+        // The watch implements only `session(_:didReceiveMessage:replyHandler:)`,
+        // so the message has to carry a reply handler to be delivered at all --
+        // the same shape `sendStartCommand` uses.
+        if session.isReachable {
+            session.sendMessage(
+                ["command": "stopWorkout"],
+                replyHandler: { _ in },
+                errorHandler: { _ in
+                    Task { @MainActor in
+                        self.queueStopCommand()
+                    }
+                }
+            )
+        } else {
+            // Out of range: queue it so the watch still ends its HKWorkoutSession
+            // when the pair reconnects, instead of collecting HR forever.
+            queueStopCommand()
+        }
+    }
+
+    private func queueStopCommand() {
+        guard let session = wcSession else { return }
+        session.transferUserInfo(["command": "stopWorkout"])
     }
 
     // MARK: - Cardio (Phase 2)

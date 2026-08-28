@@ -5,11 +5,14 @@ import WidgetKit
 /// Dynamic Island + Lock Screen Live Activity for a cycling workout.
 ///
 /// The widget receives the **full schedule** of all segments (with absolute
-/// end-times). It computes the active segment by comparing `endsAt` to
-/// `Date.now` -- so when SwiftUI's `Text(timerInterval:)` ticks past one
-/// segment's end, the body re-renders, the next segment becomes "current",
-/// the icon/name update, and a fresh countdown begins. All without any
-/// host-app code running -- crucial for the YouTube-on-top scenario.
+/// end-times) and computes the active segment by comparing `endsAt` to
+/// `Date.now`, so any re-render lands on the right segment.
+///
+/// It does NOT advance on its own: `Text(timerInterval:)` is a self-updating
+/// leaf the system ticks from an already-rendered view, and reaching its end
+/// does not re-run this closure. Only a re-render moves the banner on -- a
+/// content push from the host, the `staleDate` the host sets to the current
+/// segment's end, a screen wake, or a Dynamic Island expand.
 struct CyclingLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: CyclingActivityAttributes.self) { context in
@@ -44,7 +47,7 @@ struct CyclingLiveActivity: Widget {
                     VStack(spacing: 4) {
                         if !context.state.paused, let current {
                             ProgressView(
-                                timerInterval: Date.now...current.endsAt,
+                                timerInterval: Date.now...max(Date.now, current.endsAt),
                                 countsDown: true,
                                 label: { EmptyView() },
                                 currentValueLabel: { EmptyView() }
@@ -108,7 +111,7 @@ struct CyclingLiveActivity: Widget {
 
             if !context.state.paused, let current {
                 ProgressView(
-                    timerInterval: Date.now...current.endsAt,
+                    timerInterval: Date.now...max(Date.now, current.endsAt),
                     countsDown: true,
                     label: { EmptyView() },
                     currentValueLabel: { EmptyView() }
@@ -140,7 +143,7 @@ struct CyclingLiveActivity: Widget {
                 .foregroundStyle(.secondary)
         } else if let current = currentSegment(of: context.state) {
             Text(
-                timerInterval: Date.now...current.endsAt,
+                timerInterval: Date.now...max(Date.now, current.endsAt),
                 countsDown: true
             )
             .foregroundStyle(kindColor(current.stepKind))

@@ -10,6 +10,7 @@ enum SyncError: LocalizedError {
     case serverError(Int, String?)
     case networkError(String)
     case decodingError(String)
+    case planFetchFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ enum SyncError: LocalizedError {
             return "Network error: \(msg)"
         case .decodingError(let msg):
             return "Failed to parse response: \(msg)"
+        case .planFetchFailed(let planId):
+            return "Could not read the local copy of plan \(planId)"
         }
     }
 }
