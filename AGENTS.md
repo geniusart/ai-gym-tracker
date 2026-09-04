@@ -60,10 +60,13 @@ minutes. When they conflict with a canonical doc, the canonical doc wins.
    branch (`develop`, which is also the default); never push to `upstream`;
    never skip hooks. Do not create a feature branch unless the user asks.
 2. **Production is live with real user data.** Deploying to the VPS
-   (`ironlog-server/deploy_tls_to_vps.sh`, which targets `root@89.110.84.41` =
-   `v170184.hosted-by-vdsina.com` and runs `docker compose up --build -d` in
-   `/opt/ironlog`), running `tools/backfill_*` scripts, or `DELETE` against the
-   production MongoDB all require explicit approval before acting.
+   (`ironlog-server/deploy_tls_to_vps.sh`, which targets `root@72.56.99.246`,
+   public host `72.56.99.246.nip.io`, compose dir `/opt/ironlog/server`),
+   running `tools/backfill_*` scripts, or `DELETE` against the production
+   MongoDB all require explicit approval before acting. The VDS is shared
+   with other sites: its `Caddyfile` and `docker-compose.override.yml` are
+   hand-maintained there and must never be overwritten from this repo. The
+   former host `v170184.hosted-by-vdsina.com` is decommissioned.
 3. **Never commit, log, or paste secrets:** JWT secret, MongoDB credentials, the
    VPS SSH password (in shared notes). Read them from the environment only.
 4. **Never hand-edit `IronLog/IronLog.xcodeproj/project.pbxproj`.** It is

@@ -44,15 +44,20 @@ struct AuthResponse: Codable {
 enum SyncService {
 
     private static let serverURLKey = "syncServerURL"
-    static let defaultServerURL = "https://v170184.hosted-by-vdsina.com"
+    static let defaultServerURL = "https://72.56.99.246.nip.io"
+    // Former defaults. A saved value matching one of these is moved to
+    // `defaultServerURL` on launch (`migrateDefaultServerURLIfNeeded`), so
+    // installs still pointed at the decommissioned vdsina box recover on
+    // their own; a deliberately custom URL is left alone.
     private static let legacyDefaultServerURLs: Set<String> = [
+        "https://v170184.hosted-by-vdsina.com",
         "http://v170184.hosted-by-vdsina.com:8844",
         "http://v170184.hosted-by-vdsina.com:8844/",
         "http://89.110.84.41:8844",
         "http://89.110.84.41:8844/",
     ]
     private static let legacyDefaultFallbackURL =
-        "http://v170184.hosted-by-vdsina.com:8844"
+        "https://v170184.hosted-by-vdsina.com"
     private static let keychainTokenKey = "ironlog_jwt"
     private static let keychainEmailKey = "ironlog_email"
 

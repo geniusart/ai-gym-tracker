@@ -80,7 +80,7 @@
 
 **iOS Configuration:**
 - Server URL stored in `UserDefaults` (key: `syncServerURL`)
-- Default server: `http://v170184.hosted-by-vdsina.com:8844`
+- Default server: `https://72.56.99.246.nip.io`
 - JWT token and email stored in iOS Keychain
 - App Transport Security: `NSAllowsArbitraryLoads: true` (allows HTTP)
 - Bundle ID: `com.W88C7J82R5.ironlog`
@@ -105,7 +105,7 @@
 
 **Production -- Server:**
 - Docker host with ports 8000 (app) and 27017 (MongoDB)
-- Default deployment: `v170184.hosted-by-vdsina.com:8844`
+- Default deployment: `72.56.99.246.nip.io`
 - MongoDB 7.x (Docker image: `mongo:7`)
 - Persistent volume: `mongo_data` for database storage
 

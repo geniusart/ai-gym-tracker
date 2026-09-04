@@ -27,7 +27,7 @@ services:
     ports:
       - "${IRONLOG_TLS_HTTPS_PORT:-443}:443"
     environment:
-      - IRONLOG_DOMAIN=${IRONLOG_DOMAIN:-v170184.hosted-by-vdsina.com}
+      - IRONLOG_DOMAIN=${IRONLOG_DOMAIN:-72.56.99.246.nip.io}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

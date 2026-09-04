@@ -7,7 +7,7 @@
 **IronLog Sync Server (self-hosted):**
 - The iOS app communicates with a self-hosted FastAPI server
 - Client: `IronLog/IronLog/Services/SyncService.swift` (custom `URLSession`-based client)
-- Base URL: configurable via UserDefaults, default `http://v170184.hosted-by-vdsina.com:8844`
+- Base URL: configurable via UserDefaults, default `https://72.56.99.246.nip.io`
 - Auth: JWT Bearer token in `Authorization` header
 - Token refresh: server sends `X-Refreshed-Token` header when token nears expiry; client stores automatically
 - Device tracking: `X-Device-Id` header (iOS `identifierForVendor`)
@@ -125,7 +125,7 @@
 ## CI/CD & Deployment
 
 **Server Hosting:**
-- VDS (Virtual Dedicated Server) at `v170184.hosted-by-vdsina.com`
+- VDS (Virtual Dedicated Server) at `72.56.99.246.nip.io`
 - Port mapping: host 8844 (external) mapped to container 8000 (internal)
 - Deployment: `docker compose up --build -d`
 - Auto-restart: `restart: unless-stopped` on both app and mongo containers

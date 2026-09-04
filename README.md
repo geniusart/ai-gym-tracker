@@ -21,8 +21,8 @@ iOS-приложение для трекинга силовых трениров
 - Python / FastAPI / MongoDB (motor async)
 - JWT auth (sliding 90-day expiry)
 - Docker Compose (Caddy TLS proxy + app + mongo)
-- Production API: `https://v170184.hosted-by-vdsina.com`
-- Swagger: `https://v170184.hosted-by-vdsina.com/docs`
+- Production API: `https://72.56.99.246.nip.io`
+- Swagger: `https://72.56.99.246.nip.io/docs`
 
 ## Возможности
 
