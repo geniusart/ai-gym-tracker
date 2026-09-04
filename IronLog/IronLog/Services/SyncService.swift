@@ -45,19 +45,6 @@ enum SyncService {
 
     private static let serverURLKey = "syncServerURL"
     static let defaultServerURL = "https://72.56.99.246.nip.io"
-    // Former defaults. A saved value matching one of these is moved to
-    // `defaultServerURL` on launch (`migrateDefaultServerURLIfNeeded`), so
-    // installs still pointed at the decommissioned vdsina box recover on
-    // their own; a deliberately custom URL is left alone.
-    private static let legacyDefaultServerURLs: Set<String> = [
-        "https://v170184.hosted-by-vdsina.com",
-        "http://v170184.hosted-by-vdsina.com:8844",
-        "http://v170184.hosted-by-vdsina.com:8844/",
-        "http://89.110.84.41:8844",
-        "http://89.110.84.41:8844/",
-    ]
-    private static let legacyDefaultFallbackURL =
-        "https://v170184.hosted-by-vdsina.com"
     private static let keychainTokenKey = "ironlog_jwt"
     private static let keychainEmailKey = "ironlog_email"
 
@@ -71,19 +58,6 @@ enum SyncService {
     static var isConfigured: Bool {
         guard let url = serverURL, !url.isEmpty else { return false }
         return URL(string: url) != nil
-    }
-
-    static func migrateDefaultServerURLIfNeeded() {
-        guard let savedURL = serverURL else { return }
-        let normalized = savedURL
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingTrailingSlashes()
-        let legacyDefaults = legacyDefaultServerURLs.map {
-            $0.trimmingTrailingSlashes()
-        }
-        if legacyDefaults.contains(normalized) {
-            serverURL = defaultServerURL
-        }
     }
 
     // MARK: - Token (Keychain)
@@ -311,25 +285,12 @@ enum SyncService {
         return url
     }
 
-    private static func candidateBaseURLs() throws -> [URL] {
-        let primary = try baseURL()
-        guard shouldUseLegacyFallback(for: primary),
-              let fallback = URL(string: legacyDefaultFallbackURL)
-        else { return [primary] }
-        return [primary, fallback]
-    }
-
-    private static func shouldUseLegacyFallback(for url: URL) -> Bool {
-        url.absoluteString
-            .trimmingTrailingSlashes() == defaultServerURL.trimmingTrailingSlashes()
-    }
-
     private static func performRequest(
         path: String,
         queryItems: [URLQueryItem]? = nil,
         configure: (inout URLRequest) throws -> Void
     ) async throws -> (Data, URLResponse) {
-        let bases = try candidateBaseURLs()
+        let bases = [try baseURL()]
         var lastRetryableError: Error?
 
         for (index, base) in bases.enumerated() {

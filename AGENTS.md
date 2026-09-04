@@ -65,8 +65,7 @@ minutes. When they conflict with a canonical doc, the canonical doc wins.
    running `tools/backfill_*` scripts, or `DELETE` against the production
    MongoDB all require explicit approval before acting. The VDS is shared
    with other sites: its `Caddyfile` and `docker-compose.override.yml` are
-   hand-maintained there and must never be overwritten from this repo. The
-   former host `v170184.hosted-by-vdsina.com` is decommissioned.
+   hand-maintained there and must never be overwritten from this repo.
 3. **Never commit, log, or paste secrets:** JWT secret, MongoDB credentials, the
    VPS SSH password (in shared notes). Read them from the environment only.
 4. **Never hand-edit `IronLog/IronLog.xcodeproj/project.pbxproj`.** It is
