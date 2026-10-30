@@ -1,12 +1,16 @@
+name: ironlog
+
+# Production layout (Vultr VDS, /opt/ironlog/server): the box is shared, so
+# this project has no Caddy of its own. TLS ends in the host Caddy
+# (/etc/caddy/Caddyfile, block "ironlog.egorianin.ru:8001"), which proxies to
+# the app on loopback. Ports are published on 127.0.0.1 only: docker bypasses
+# ufw, so 0.0.0.0 would expose them to the internet.
 services:
   app:
     build: .
+    image: ironlog-app
     ports:
-      # Temporary compatibility port for old app builds and direct health checks.
-      # Production HTTPS traffic should come through Caddy on 443.
-      - "${IRONLOG_HTTP_PORT:-8844}:8000"
-    expose:
-      - "8000"
+      - "${IRONLOG_HTTP_BIND:-127.0.0.1}:${IRONLOG_HTTP_PORT:-8844}:8000"
     volumes:
       - ${IRONLOG_SCHEMAS_DIR:-../schemas}:/schemas:ro
       - ${IRONLOG_DOCS_DIR:-../docs}:/docs:ro
@@ -18,31 +22,20 @@ services:
       - ADMIN_EMAILS=${ADMIN_EMAILS:-}
     depends_on:
       - mongo
-    restart: unless-stopped
-
-  caddy:
-    image: caddy:2.8-alpine
-    depends_on:
-      - app
-    ports:
-      - "${IRONLOG_TLS_HTTPS_PORT:-443}:443"
-    environment:
-      - IRONLOG_DOMAIN=${IRONLOG_DOMAIN:-72.56.99.246.nip.io}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+    mem_limit: 256m
     restart: unless-stopped
 
   mongo:
-    image: mongo:7
+    image: mongo:7.0.34
+    # The VDS has 1.6 GB RAM for every tenant: cap the WiredTiger cache and
+    # the container so mongo does not take the box down.
+    command: ["--wiredTigerCacheSizeGB", "0.25"]
     ports:
       - "${IRONLOG_MONGO_BIND:-127.0.0.1}:${IRONLOG_MONGO_PORT:-27017}:27017"
     volumes:
       - mongo_data:/data/db
+    mem_limit: 512m
     restart: unless-stopped
 
 volumes:
   mongo_data:
-  caddy_data:
-  caddy_config:

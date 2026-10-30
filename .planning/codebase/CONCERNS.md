@@ -67,7 +67,7 @@
 - Recommendations: Add rate limiting middleware (e.g., `slowapi`) on `/login` and `/register`.
 
 **HTTP-only server communication (no TLS):**
-- Risk: The default server URL is `https://72.56.99.246.nip.io` -- plaintext HTTP. JWT tokens, passwords, and workout data are transmitted unencrypted.
+- Risk: The default server URL was plaintext HTTP (now `https://ironlog.egorianin.ru`). JWT tokens, passwords, and workout data are transmitted unencrypted.
 - Files: `IronLog/IronLog/Services/SyncService.swift` (line 44)
 - Current mitigation: ATS exception configured to allow HTTP.
 - Recommendations: Set up TLS (HTTPS) on the server. Use a reverse proxy (nginx/caddy) with Let's Encrypt.

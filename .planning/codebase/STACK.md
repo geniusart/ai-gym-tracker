@@ -80,7 +80,7 @@
 
 **iOS Configuration:**
 - Server URL stored in `UserDefaults` (key: `syncServerURL`)
-- Default server: `https://72.56.99.246.nip.io`
+- Default server: `https://ironlog.egorianin.ru`
 - JWT token and email stored in iOS Keychain
 - App Transport Security: `NSAllowsArbitraryLoads: true` (allows HTTP)
 - Bundle ID: `com.W88C7J82R5.ironlog`
@@ -105,7 +105,7 @@
 
 **Production -- Server:**
 - Docker host with ports 8000 (app) and 27017 (MongoDB)
-- Default deployment: `72.56.99.246.nip.io`
+- Default deployment: `ironlog.egorianin.ru` (see `docs/DEPLOY.md`)
 - MongoDB 7.x (Docker image: `mongo:7`)
 - Persistent volume: `mongo_data` for database storage
 

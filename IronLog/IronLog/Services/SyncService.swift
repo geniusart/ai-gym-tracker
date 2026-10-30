@@ -44,7 +44,18 @@ struct AuthResponse: Codable {
 enum SyncService {
 
     private static let serverURLKey = "syncServerURL"
-    static let defaultServerURL = "https://72.56.99.246.nip.io"
+    // A name under our own domain: the next host move only changes DNS,
+    // not the app.
+    static let defaultServerURL = "https://ironlog.egorianin.ru"
+    // Former defaults. The previous host migration persisted its default
+    // explicitly, so most installs carry one of these in UserDefaults rather
+    // than following the registered default. A saved value matching one is
+    // moved to `defaultServerURL` on launch; a custom URL is left alone.
+    private static let legacyDefaultServerURLs: Set<String> = [
+        "https://72.56.99.246.nip.io",
+        "http://72.56.99.246.nip.io:8844",
+        "http://72.56.99.246:8844",
+    ]
     private static let keychainTokenKey = "ironlog_jwt"
     private static let keychainEmailKey = "ironlog_email"
 
@@ -58,6 +69,16 @@ enum SyncService {
     static var isConfigured: Bool {
         guard let url = serverURL, !url.isEmpty else { return false }
         return URL(string: url) != nil
+    }
+
+    static func migrateDefaultServerURLIfNeeded() {
+        guard let savedURL = serverURL else { return }
+        let normalized = savedURL
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingTrailingSlashes()
+        if legacyDefaultServerURLs.contains(normalized) {
+            serverURL = defaultServerURL
+        }
     }
 
     // MARK: - Token (Keychain)

@@ -1,39 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploys the IronLog API to the production VDS.
+# Deploys the IronLog API to the production VDS (see docs/DEPLOY.md).
 #
 # Layout on the box (see /opt/ironlog/server/.env):
-#   /opt/ironlog/server   compose project "server": app, mongo, caddy
+#   /opt/ironlog/server   compose project "ironlog": app, mongo
 #   /opt/ironlog/schemas  mounted into app as /schemas
 #   /opt/ironlog/docs     mounted into app as /docs
 #
-# The VDS is shared with other sites. Its Caddyfile is hand-maintained and
-# multi-tenant (egorianin.ru, mif.academy, opencall.guru, ...), and
-# docker-compose.override.yml carries the box-specific wiring. Neither file
-# is in this repo and neither is ever synced from here -- pushing the
-# repo's single-site Caddyfile would take every other site down.
+# The VDS is shared with other tenants. ironlog has no Caddy of its own: TLS
+# ends in the host Caddy, whose /etc/caddy/Caddyfile is hand-maintained and
+# multi-tenant (opencall.guru, mif.academy, egorianin.ru, ...). It is never
+# synced from here. The compose file publishes ports on 127.0.0.1 only.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVER="${IRONLOG_DEPLOY_SERVER:-root@72.56.99.246}"
+SERVER="${IRONLOG_DEPLOY_SERVER:-root@185.92.222.132}"
 REMOTE_DIR="${IRONLOG_DEPLOY_DIR:-/opt/ironlog/server}"
 REMOTE_ROOT="$(dirname "${REMOTE_DIR}")"
-PUBLIC_HOST="${IRONLOG_PUBLIC_HOST:-72.56.99.246.nip.io}"
+PUBLIC_HOST="${IRONLOG_PUBLIC_HOST:-ironlog.egorianin.ru}"
+SSH_KEY="${IRONLOG_DEPLOY_SSH_KEY:-${HOME}/.ssh/shorts_lab_vds_ed25519}"
 CONTROL_PATH="${TMPDIR:-/tmp}/ironlog-deploy-%r@%h:%p"
 SSH_OPTS=(
   -o ControlMaster=auto
   -o ControlPersist=5m
   -o ControlPath="${CONTROL_PATH}"
 )
-RSYNC_SSH="ssh -o ControlMaster=auto -o ControlPersist=5m -o ControlPath=${CONTROL_PATH}"
+# The host allows key-only login with MaxAuthTries 3: offer just this key.
+if [[ -f "${SSH_KEY}" ]]; then
+  SSH_OPTS+=(-o IdentitiesOnly=yes -i "${SSH_KEY}")
+fi
+RSYNC_SSH="ssh ${SSH_OPTS[*]}"
 
 echo "Deploying IronLog API to ${SERVER}:${REMOTE_DIR}"
 
 ssh "${SSH_OPTS[@]}" "${SERVER}" "mkdir -p '${REMOTE_DIR}' '${REMOTE_ROOT}/schemas' '${REMOTE_ROOT}/docs' '${REMOTE_ROOT}/deploy-backups'"
 ssh "${SSH_OPTS[@]}" "${SERVER}" "cd '${REMOTE_DIR}' && tar --exclude='.venv*' --exclude='.pytest_cache' -czf '${REMOTE_ROOT}/deploy-backups/pre-deploy-$(date +%Y%m%d-%H%M%S).tgz' . || true"
 
-# Application code and the base compose file only. Caddyfile and
-# docker-compose.override.yml stay untouched on purpose (see header).
+# Application code and the compose file only. .env stays untouched, and the
+# host Caddyfile is not ours to sync (see header).
 rsync -az --delete -e "${RSYNC_SSH}" \
   "${ROOT_DIR}/ironlog-server/app" \
   "${ROOT_DIR}/ironlog-server/tools" \
@@ -42,11 +46,14 @@ rsync -az --delete -e "${RSYNC_SSH}" \
   "${ROOT_DIR}/ironlog-server/docker-compose.yml" \
   "${SERVER}:${REMOTE_DIR}/"
 
-rsync -az --delete -e "${RSYNC_SSH}" \
+# Explicit modes: rsync -a would copy a local 0600 file as is, and the app
+# (non-root appuser in the container) could not read it (503 on
+# /agent-instructions/plan-import).
+rsync -az --delete --chmod=D755,F644 -e "${RSYNC_SSH}" \
   "${ROOT_DIR}/schemas/" \
   "${SERVER}:${REMOTE_ROOT}/schemas/"
 
-rsync -az --delete -e "${RSYNC_SSH}" \
+rsync -az --delete --chmod=D755,F644 -e "${RSYNC_SSH}" \
   "${ROOT_DIR}/docs/" \
   "${SERVER}:${REMOTE_ROOT}/docs/"
 

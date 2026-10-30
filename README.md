@@ -20,9 +20,10 @@ iOS-приложение для трекинга силовых трениров
 ### Sync-сервер (`ironlog-server/`)
 - Python / FastAPI / MongoDB (motor async)
 - JWT auth (sliding 90-day expiry)
-- Docker Compose (Caddy TLS proxy + app + mongo)
-- Production API: `https://72.56.99.246.nip.io`
-- Swagger: `https://72.56.99.246.nip.io/docs`
+- Docker Compose (app + mongo); TLS - общий Caddy хоста
+- Production API: `https://ironlog.egorianin.ru`
+- Swagger: `https://ironlog.egorianin.ru/docs`
+- Где живет прод и как выкатывать: [docs/DEPLOY.md](docs/DEPLOY.md)
 
 ## Возможности
 
@@ -108,8 +109,8 @@ cd IronLog && xcodegen generate && open IronLog.xcodeproj
 cd ironlog-server && docker compose up --build -d
 ```
 
-Production compose exposes HTTPS through Caddy on `443`.
-The legacy direct HTTP port `8844` is kept temporarily for old app builds.
+В проде compose публикует порты только на `127.0.0.1`; HTTPS отдает общий Caddy
+хоста (см. [docs/DEPLOY.md](docs/DEPLOY.md)).
 
 ## Структура
 

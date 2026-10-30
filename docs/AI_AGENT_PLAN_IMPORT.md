@@ -5,7 +5,7 @@ This document is the contract for AI agents that generate IronLog plan JSON for 
 Production API base URL:
 
 ```text
-https://v170184.hosted-by-vdsina.com
+https://ironlog.egorianin.ru
 ```
 
 Use relative paths when running against another IronLog server.
@@ -22,8 +22,8 @@ GET /agent-instructions/plan-import.json
 Production URLs:
 
 ```text
-https://v170184.hosted-by-vdsina.com/agent-instructions/plan-import
-https://v170184.hosted-by-vdsina.com/agent-instructions/plan-import.json
+https://ironlog.egorianin.ru/agent-instructions/plan-import
+https://ironlog.egorianin.ru/agent-instructions/plan-import.json
 ```
 
 The server stores the editable instruction text in MongoDB. The repository file is only the initial fallback for fresh deployments. Operators can update the instruction without redeploying the container:
@@ -74,9 +74,9 @@ GET /schema?type=cycling
 Production URLs:
 
 ```text
-https://v170184.hosted-by-vdsina.com/schema
-https://v170184.hosted-by-vdsina.com/schema?type=strength
-https://v170184.hosted-by-vdsina.com/schema?type=cycling
+https://ironlog.egorianin.ru/schema
+https://ironlog.egorianin.ru/schema?type=strength
+https://ironlog.egorianin.ru/schema?type=cycling
 ```
 
 Strength exercise catalog:
@@ -91,10 +91,10 @@ GET /exercise-docs/missing?locale=ru&status=reviewed
 Production URLs:
 
 ```text
-https://v170184.hosted-by-vdsina.com/exercises/catalog?plan_type=strength
-https://v170184.hosted-by-vdsina.com/exercises/{slug}
-https://v170184.hosted-by-vdsina.com/exercises/{slug}/docs?locale=ru
-https://v170184.hosted-by-vdsina.com/exercise-docs/missing?locale=ru&status=reviewed
+https://ironlog.egorianin.ru/exercises/catalog?plan_type=strength
+https://ironlog.egorianin.ru/exercises/{slug}
+https://ironlog.egorianin.ru/exercises/{slug}/docs?locale=ru
+https://ironlog.egorianin.ru/exercise-docs/missing?locale=ru&status=reviewed
 ```
 
 Muscle group reference:
@@ -108,9 +108,9 @@ GET /muscle-groups/{slug}
 Production URLs:
 
 ```text
-https://v170184.hosted-by-vdsina.com/muscle-groups
-https://v170184.hosted-by-vdsina.com/muscle-groups?region=legs
-https://v170184.hosted-by-vdsina.com/muscle-groups/{slug}
+https://ironlog.egorianin.ru/muscle-groups
+https://ironlog.egorianin.ru/muscle-groups?region=legs
+https://ironlog.egorianin.ru/muscle-groups/{slug}
 ```
 
 Plan upload and existing versions require JWT auth:

@@ -68,8 +68,8 @@ iOS-приложение для трекинга силовых и кардио-
 
 #### Сервер
 - FastAPI + MongoDB + Docker
-- Production API: `https://v170184.hosted-by-vdsina.com`; Swagger: `https://v170184.hosted-by-vdsina.com/docs`
-- TLS terminates in Caddy (`443`) and proxies to the FastAPI container; `http://v170184.hosted-by-vdsina.com:8844` is temporary compatibility for old app builds. Notice period starts 2026-05-05; direct HTTP should be removed after 2026-08-01 once active app builds use HTTPS.
+- Production API: `https://ironlog.egorianin.ru`; Swagger: `https://ironlog.egorianin.ru/docs`
+- TLS terminates in the shared host Caddy, which proxies to the FastAPI container on `127.0.0.1:8844`; there is no public direct-HTTP port. Hosting and deploy: [`DEPLOY.md`](DEPLOY.md).
 - JWT auth (регистрация, вход, sliding 90-day expiry)
 - Plan sync: `GET /plans` возвращает FULL контент (последняя версия каждого plan_id), polymorphic по plan_type
 - Plan upload: `PUT /plan` -- сервер peek'ает `plan_type` и роутит на base + соответствующий per-type валидатор (strength_v1 / cycling_v1). Soft-warnings (например отсутствие `catalog_id`) возвращаются в `_warnings: []` без 422.
