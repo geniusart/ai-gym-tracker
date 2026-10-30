@@ -19,7 +19,9 @@ REMOTE_DIR="${IRONLOG_DEPLOY_DIR:-/opt/ironlog/server}"
 REMOTE_ROOT="$(dirname "${REMOTE_DIR}")"
 PUBLIC_HOST="${IRONLOG_PUBLIC_HOST:-ironlog.egorianin.ru}"
 SSH_KEY="${IRONLOG_DEPLOY_SSH_KEY:-${HOME}/.ssh/shorts_lab_vds_ed25519}"
-CONTROL_PATH="${TMPDIR:-/tmp}/ironlog-deploy-%r@%h:%p"
+# Short path with a connection hash: macOS $TMPDIR is long enough to break
+# the 104-byte limit on unix socket paths.
+CONTROL_PATH="/tmp/ironlog-deploy-%C"
 SSH_OPTS=(
   -o ControlMaster=auto
   -o ControlPersist=5m
@@ -46,16 +48,18 @@ rsync -az --delete -e "${RSYNC_SSH}" \
   "${ROOT_DIR}/ironlog-server/docker-compose.yml" \
   "${SERVER}:${REMOTE_DIR}/"
 
-# Explicit modes: rsync -a would copy a local 0600 file as is, and the app
-# (non-root appuser in the container) could not read it (503 on
-# /agent-instructions/plan-import).
-rsync -az --delete --chmod=D755,F644 -e "${RSYNC_SSH}" \
+rsync -az --delete -e "${RSYNC_SSH}" \
   "${ROOT_DIR}/schemas/" \
   "${SERVER}:${REMOTE_ROOT}/schemas/"
 
-rsync -az --delete --chmod=D755,F644 -e "${RSYNC_SSH}" \
+rsync -az --delete -e "${RSYNC_SSH}" \
   "${ROOT_DIR}/docs/" \
   "${SERVER}:${REMOTE_ROOT}/docs/"
+
+# rsync -a keeps local modes, and a local 0600 doc is unreadable for the
+# container's non-root appuser (503 on /agent-instructions/plan-import).
+# macOS openrsync has no --chmod, so fix the modes on the host.
+ssh "${SSH_OPTS[@]}" "${SERVER}" "chmod -R a+rX '${REMOTE_ROOT}/schemas' '${REMOTE_ROOT}/docs'"
 
 ssh "${SSH_OPTS[@]}" "${SERVER}" "cd '${REMOTE_DIR}' && touch .env && \
   (grep -q '^IRONLOG_SCHEMAS_DIR=' .env || printf '\nIRONLOG_SCHEMAS_DIR=${REMOTE_ROOT}/schemas\n' >> .env) && \
